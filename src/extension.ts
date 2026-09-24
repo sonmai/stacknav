@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { relative, isAbsolute, sep } from 'node:path';
-import { CliError, StackCli } from './cli';
+import { CliError, RepositoryMismatchError, StackCli } from './cli';
 import { NavState, navigation, normalizePrUrl, parseCurrentPr, parseStack, prLabel, prSummary, StackBranch, StackView } from './core';
 import { PrTitles } from './prTitles';
 
@@ -82,8 +82,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   async function loadTitles(stack: StackView, root: string, ticket: number): Promise<void> {
     const prs = stack.branches.flatMap(branch => branch.pr ? [branch.pr] : []);
     for (let i = 0; i < prs.length && !disposed && ticket === generation; i += 4) {
-      await Promise.all(prs.slice(i, i + 4).map(pr => titles.get(root, pr.url)));
-      if (!disposed && ticket === generation && stateRoot === root) {
+      const batch = prs.slice(i, i + 4);
+      const before = batch.map(pr => titles.peek(pr.url));
+      await Promise.all(batch.map(pr => titles.get(root, pr.url)));
+      const changed = batch.some((pr, index) => titles.peek(pr.url) !== before[index]);
+      if (changed && !disposed && ticket === generation && stateRoot === root) {
         render();
         updatePicker?.();
       }
@@ -242,7 +245,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       busy = false;
     }
     if (failure) {
-      const detail = failure instanceof CliError && /different composition|already tracked/i.test(failure.message)
+      const detail = failure instanceof RepositoryMismatchError ? failure.message
+        : failure instanceof CliError && /different composition|already tracked/i.test(failure.message)
         ? 'The local stack has a different composition. Resolve that conflict manually before loading.'
         : failure instanceof CliError && /remote\.pushDefault|multiple remotes|choose.*remote/i.test(failure.message)
           ? 'Set Git remote.pushDefault for this repository, then try again.'

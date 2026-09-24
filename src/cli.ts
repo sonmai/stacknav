@@ -9,6 +9,8 @@ export class CliError extends Error {
   }
 }
 
+export class RepositoryMismatchError extends Error {}
+
 type Runner = (args: readonly string[], cwd: string) => Promise<string>;
 
 export class StackCli {
@@ -23,7 +25,25 @@ export class StackCli {
   }
 
   load(cwd: string, prUrl: string): Promise<string> {
-    return this.runner(['stack', 'checkout', normalizePrUrl(prUrl)], cwd);
+    return this.loadChecked(cwd, normalizePrUrl(prUrl));
+  }
+
+  private async loadChecked(cwd: string, prUrl: string): Promise<string> {
+    const value: unknown = JSON.parse(await this.runner(['repo', 'view', '--json', 'url'], cwd));
+    if (!value || typeof value !== 'object' || !('url' in value) || typeof value.url !== 'string') {
+      throw new Error('Could not determine the local repository identity');
+    }
+    const repository = new URL(value.url);
+    if (repository.protocol !== 'https:' || repository.username || repository.password ||
+        repository.search || repository.hash || !/^\/[^/]+\/[^/]+\/?$/.test(repository.pathname)) {
+      throw new Error('Unexpected repository URL');
+    }
+    const expected = `${repository.origin}${repository.pathname.replace(/\/$/, '')}`;
+    const requested = prUrl.slice(0, prUrl.lastIndexOf('/pull/'));
+    if (requested.toLowerCase() !== expected.toLowerCase()) {
+      throw new RepositoryMismatchError(`This PR belongs to ${requested}, but the selected repository is ${expected}. Open the matching local repository and try again.`);
+    }
+    return this.runner(['stack', 'checkout', prUrl], cwd);
   }
 
   async prTitle(cwd: string, prUrl: string): Promise<string> {

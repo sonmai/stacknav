@@ -10,7 +10,7 @@ Click an arrow to move one layer. Click the middle to choose a layer from a VS C
 
 When you check out a PR branch that has no local stack, StackNav offers **Load stack for #184**. This detects a PR on the current branch, but cannot establish whether the PR belongs to a remote stack until you click Load. Loading uses the PR URL with `gh stack checkout`, fetches its stack locally, and may switch your local branch. An ordinary PR without a stack will report an error in **Output → StackNav**.
 
-You can also run **StackNav: Load Stack from PR URL…** and paste a PR link without first checking out its branch. Links to the Files, Commits, and Checks tabs are accepted. The command uses the active local repository, or asks you to choose one when there is no active repository in a multi-repository workspace.
+You can also run **StackNav: Load Stack from PR URL…** and paste a PR link without first checking out its branch. Links to the Files, Commits, and Checks tabs are accepted. Before checkout, StackNav checks the PR URL’s host and owner/repository against the repository resolved by GitHub CLI in the selected local folder. A mismatch or failed lookup stops loading. The command uses the active local repository, or asks you to choose one when there is no active repository in a multi-repository workspace.
 
 PR titles load in the background and are cached for five minutes during the session. If a title lookup fails, PR number and branch name remain available; navigation does not wait for titles. **StackNav: Refresh** clears the title cache.
 
@@ -36,7 +36,7 @@ The status bar refreshes after HEAD changes and StackNav actions, or when you ru
 
 ## Safety
 
-StackNav never calls `gh stack sync`, `push`, `submit`, `rebase`, or any command that writes remote branches or PRs. It uses `gh stack view --json` and `gh pr view --json` to display state. Loading a remote stack with `gh stack checkout <PR URL>` fetches branches and sets up local tracking; navigation changes the local checkout. `gh stack view --json` may refresh PR status in local metadata. StackNav never stashes, resets, or forces a checkout. If a switch cannot safely carry local edits across, it reports the error.
+StackNav never calls `gh stack sync`, `push`, `submit`, `rebase`, or any command that writes remote branches or PRs. It uses `gh stack view --json` and `gh pr view --json` to display state, and `gh repo view --json url` to check repository identity before loading. Loading a remote stack with `gh stack checkout <PR URL>` fetches branches and sets up local tracking; navigation changes the local checkout. `gh stack view --json` may refresh PR status in local metadata. StackNav never stashes, resets, or forces a checkout. If a switch cannot safely carry local edits across, it reports the error.
 
 ## Automatic releases
 
