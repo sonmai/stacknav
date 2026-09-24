@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { relative, isAbsolute, sep } from 'node:path';
 import { CliError, RepositoryMismatchError, StackCli } from './cli';
-import { NavState, navigation, normalizePrUrl, parseCurrentPr, parseStack, prLabel, prSummary, descriptionPreview, StackBranch, StackView } from './core';
+import { NavState, navigation, normalizePrUrl, parseCurrentPr, parseStack, prLabel, prSummary, branchStatus, StackBranch, StackView } from './core';
 import { PrDetailsCache } from './prDetails';
 
 interface GitRepository {
@@ -19,15 +19,20 @@ interface GitApi {
 }
 
 interface GitExtension {
+  enabled?: boolean;
+  onDidChangeEnablement?: vscode.Event<boolean>;
   getAPI(version: 1): GitApi;
 }
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   const output = vscode.window.createOutputChannel('StackNav');
   const cli = new StackCli();
-  const titles = new PrDetailsCache(async (root, url) => {
-    try { return await cli.prDetails(root, url); }
-    catch (error) { output.appendLine(`PR details lookup: ${String(error)}`); throw error; }
+  const titles = new PrDetailsCache(async (root, url, includeBody, signal) => {
+    try { return await cli.prDetails(root, url, includeBody, signal); }
+    catch (error) {
+      if (!signal?.aborted) { output.appendLine(`PR details lookup: ${String(error)}`); }
+      throw error;
+    }
   });
   const down = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 102);
   const center = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 101);
@@ -37,8 +42,15 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   up.command = 'stacknav.up';
   context.subscriptions.push(output, down, center, up);
 
-  const git = await vscode.extensions.getExtension<GitExtension>('vscode.git')?.activate();
-  const api = git?.getAPI(1);
+  let git: GitExtension | undefined;
+  let api: GitApi | undefined;
+  try {
+    git = await vscode.extensions.getExtension<GitExtension>('vscode.git')?.activate();
+    api = git?.getAPI(1);
+  } catch (error) { output.appendLine(`Git extension: ${String(error)}`); }
+  if (!api || git?.enabled === false) {
+    void vscode.window.showWarningMessage('StackNav requires the built-in Git extension. Enable Git and reload the window.');
+  }
   const repositoryListeners = new Map<GitRepository, vscode.Disposable>();
   const observedHeads = new Map<GitRepository, string>();
   let state: NavState = { type: 'empty' };
@@ -46,6 +58,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   let generation = 0;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let busy = false;
+  let dirty = false;
+  let reads: AbortController | undefined;
   let selectedRepository: GitRepository | undefined;
   let updatePicker: (() => void) | undefined;
   let disposed = false;
@@ -79,14 +93,17 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     return `${prSummary(branch, title)}${title ? `\n${branch.name}` : ''}`;
   }
 
-  async function loadTitles(stack: StackView, root: string, ticket: number): Promise<void> {
-    const prs = stack.branches.flatMap(branch => branch.pr ? [branch.pr] : []);
-    for (let i = 0; i < prs.length && !disposed && ticket === generation; i += 4) {
+  async function loadTitles(stack: StackView, root: string, ticket: number, signal: AbortSignal): Promise<void> {
+    const prs = stack.branches.filter(branch => branch.pr).sort((a, b) => Number(b.isCurrent) - Number(a.isCurrent));
+    for (let i = 0; i < prs.length && !disposed && !signal.aborted && ticket === generation; i += 4) {
       const batch = prs.slice(i, i + 4);
-      const before = batch.map(pr => titles.peek(pr.url));
-      await Promise.all(batch.map(pr => titles.get(root, pr.url)));
-      const changed = batch.some((pr, index) => (titles.peek(pr.url)?.title !== before[index]?.title || titles.peek(pr.url)?.body !== before[index]?.body));
-      if (changed && !disposed && ticket === generation && stateRoot === root) {
+      const before = batch.map(branch => titles.peek(branch.pr!.url));
+      await Promise.all(batch.map(branch => titles.get(root, branch.pr!.url, branch.isCurrent, signal)));
+      const changed = batch.some((branch, index) => {
+        const after = titles.peek(branch.pr!.url);
+        return after?.title !== before[index]?.title || after?.body !== before[index]?.body;
+      });
+      if (changed && !disposed && !signal.aborted && ticket === generation && stateRoot === root) {
         render();
         updatePicker?.();
       }
@@ -110,13 +127,28 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       center.show();
       return;
     }
+    if (state.type === 'trunk') {
+      const first = state.stack.branches.find(branch => !branch.isMerged);
+      center.text = '$(layers) Trunk';
+      center.tooltip = `${state.stack.trunk} · ${state.stack.branches.length} layers`;
+      center.command = first ? 'stacknav.first' : undefined;
+      center.show();
+      if (first) {
+        up.command = 'stacknav.first';
+        up.text = '$(arrow-up)';
+        up.tooltip = `First active layer: ${details(first)}`;
+        up.show();
+      }
+      return;
+    }
+    up.command = 'stacknav.up';
     const { stack, index } = state;
     const current = stack.branches[index];
     const targets = navigation(stack, index);
-    center.text = `$(layers) ${index + 1}/${stack.branches.length} · ${prLabel(current)}`;
+    center.text = `$(layers) ${index + 1}/${stack.branches.length} · ${prLabel(current)}${branchStatus(current)}`;
     const metadata = current.pr && titles.peek(current.pr.url);
-    const preview = descriptionPreview(metadata?.body ?? '');
-    center.tooltip = `${index + 1}/${stack.branches.length}\n${prSummary(current, metadata?.title)}${preview ? `\n\n${preview}` : ''}`;
+    const preview = metadata?.body ?? '';
+    center.tooltip = `${index + 1}/${stack.branches.length}\n${prSummary(current, metadata?.title)}${branchStatus(current)}${preview ? `\n\n${preview}` : ''}`;
     center.command = 'stacknav.select';
     center.show();
     if (targets.below !== undefined) {
@@ -133,7 +165,15 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   async function refresh(): Promise<void> {
     if (disposed) { return; }
+    if (busy) { dirty = true; return; }
     const ticket = ++generation;
+    reads?.abort();
+    reads = new AbortController();
+    const { signal } = reads;
+    if (!api || git?.enabled === false) {
+      state = { type: 'error', message: 'Enable the built-in Git extension and reload the window.' };
+      stateRoot = undefined; render(); return;
+    }
     const repo = activeRepository();
     const root = repo?.rootUri.fsPath;
     if (!root) {
@@ -143,23 +183,23 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       return;
     }
     try {
-      const json = await cli.view(root);
+      const json = await cli.view(root, signal);
       const next = parseStack(json);
-      if (ticket !== generation) { return; }
+      if (signal.aborted || ticket !== generation) { return; }
       state = next;
       stateRoot = root;
       render();
-      if (next.type === 'loaded') { void loadTitles(next.stack, root, ticket); }
+      if (next.type === 'loaded' || next.type === 'trunk') { void loadTitles(next.stack, root, ticket, signal); }
     } catch (error) {
-      if (ticket !== generation) { return; }
+      if (signal.aborted || ticket !== generation) { return; }
       if (error instanceof CliError && error.exitCode === 2) {
         try {
-          const pr = parseCurrentPr(await cli.currentPr(root));
-          if (ticket !== generation) { return; }
+          const pr = parseCurrentPr(await cli.currentPr(root, signal));
+          if (signal.aborted || ticket !== generation) { return; }
           state = { type: 'unloaded', pr };
         } catch (prError) {
           output.appendLine(`PR lookup: ${String(prError)}`);
-          if (ticket !== generation) { return; }
+          if (signal.aborted || ticket !== generation) { return; }
           state = { type: 'empty' };
         }
       } else {
@@ -176,21 +216,28 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   }
 
   function scheduleRefresh(): void {
+    if (disposed) { return; }
+    reads?.abort();
+    if (busy) { dirty = true; return; }
     if (timer) { clearTimeout(timer); }
     timer = setTimeout(() => { timer = undefined; void refresh(); }, 250);
   }
 
   function observe(repo: GitRepository): void {
+    repositoryListeners.get(repo)?.dispose();
     const headKey = () => `${repo.state.HEAD?.name ?? ''}\0${repo.state.HEAD?.commit ?? ''}`;
     observedHeads.set(repo, headKey());
     repositoryListeners.set(repo, repo.state.onDidChange(() => {
       const next = headKey();
       if (next === observedHeads.get(repo)) { return; }
       observedHeads.set(repo, next);
-      if (!busy) { scheduleRefresh(); }
+      scheduleRefresh();
     }));
   }
 
+  if (git?.onDidChangeEnablement) {
+    context.subscriptions.push(git.onDidChangeEnablement(() => scheduleRefresh()));
+  }
   if (api) {
     for (const repo of api.repositories) { observe(repo); }
     context.subscriptions.push(api.onDidOpenRepository(repo => { observe(repo); scheduleRefresh(); }));
@@ -207,6 +254,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   context.subscriptions.push({ dispose: () => {
     disposed = true;
     ++generation;
+    reads?.abort();
     if (timer) { clearTimeout(timer); }
     for (const listener of repositoryListeners.values()) { listener.dispose(); }
   } });
@@ -221,6 +269,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     const root = explicitRoot ?? currentRoot();
     if (!root) { await refresh(); return; }
     busy = true;
+    stateRoot = undefined;
+    reads?.abort();
     let failure: unknown;
     try {
       output.appendLine(`${label} in ${root}`);
@@ -237,8 +287,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       output.appendLine(`${label}: ${String(error)}`);
       failure = error;
     } finally {
-      await refresh();
       busy = false;
+      if (dirty) { dirty = false; scheduleRefresh(); }
+      else { await refresh(); }
     }
     if (failure) {
       const detail = failure instanceof RepositoryMismatchError ? failure.message
@@ -284,6 +335,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       const url = state.pr.url;
       await perform('Load stack', root => cli.load(root, url), true);
     }),
+    vscode.commands.registerCommand('stacknav.first', async () => {
+      if (state.type === 'trunk' && state.stack.branches.some(branch => !branch.isMerged)) {
+        await perform('Go to first layer', root => cli.firstLayer(root));
+      }
+    }),
     vscode.commands.registerCommand('stacknav.up', async () => {
       if (state.type === 'loaded' && navigation(state.stack, state.index).above !== undefined) {
         await perform('Move up', root => cli.move(root, 'up'));
@@ -306,7 +362,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             index,
             branch,
             label: `${branch.isCurrent ? '$(check)' : '$(circle-outline)'} ${prSummary(branch, branch.pr && titles.peek(branch.pr.url)?.title)}`,
-            description: `${index + 1}/${stack.branches.length}${branch.isCurrent ? ' · Current' : ''}`,
+            description: `${index + 1}/${stack.branches.length}${branch.isCurrent ? ' · Current' : ''}${branchStatus(branch)}`,
             detail: branch.name
           };
         });
