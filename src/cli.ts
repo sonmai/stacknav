@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process';
+import { normalizePrUrl } from './core';
 
 const executable = process.platform === 'win32' ? 'gh.exe' : 'gh';
 
@@ -7,6 +8,8 @@ export class CliError extends Error {
     super(message);
   }
 }
+
+export class RepositoryMismatchError extends Error {}
 
 type Runner = (args: readonly string[], cwd: string) => Promise<string>;
 
@@ -22,10 +25,33 @@ export class StackCli {
   }
 
   load(cwd: string, prUrl: string): Promise<string> {
-    if (!/^https:\/\/[^/]+\/[^/]+\/[^/]+\/pull\/\d+$/.test(prUrl)) {
-      throw new Error('Invalid PR URL');
+    return this.loadChecked(cwd, normalizePrUrl(prUrl));
+  }
+
+  private async loadChecked(cwd: string, prUrl: string): Promise<string> {
+    const value: unknown = JSON.parse(await this.runner(['repo', 'view', '--json', 'url'], cwd));
+    if (!value || typeof value !== 'object' || !('url' in value) || typeof value.url !== 'string') {
+      throw new Error('Could not determine the local repository identity');
+    }
+    const repository = new URL(value.url);
+    if (repository.protocol !== 'https:' || repository.username || repository.password ||
+        repository.search || repository.hash || !/^\/[^/]+\/[^/]+\/?$/.test(repository.pathname)) {
+      throw new Error('Unexpected repository URL');
+    }
+    const expected = `${repository.origin}${repository.pathname.replace(/\/$/, '')}`;
+    const requested = prUrl.slice(0, prUrl.lastIndexOf('/pull/'));
+    if (requested.toLowerCase() !== expected.toLowerCase()) {
+      throw new RepositoryMismatchError(`This PR belongs to ${requested}, but the selected repository is ${expected}. Open the matching local repository and try again.`);
     }
     return this.runner(['stack', 'checkout', prUrl], cwd);
+  }
+
+  async prTitle(cwd: string, prUrl: string): Promise<string> {
+    const value: unknown = JSON.parse(await this.runner(['pr', 'view', normalizePrUrl(prUrl), '--json', 'title'], cwd));
+    if (!value || typeof value !== 'object' || !('title' in value) || typeof value.title !== 'string') {
+      throw new Error('Unexpected PR title response');
+    }
+    return value.title.replace(/[\r\n]+/g, ' ').trim();
   }
 
   move(cwd: string, direction: 'up' | 'down', steps = 1): Promise<string> {
