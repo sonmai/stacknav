@@ -68,6 +68,33 @@ export function prLabel(branch: StackBranch): string {
   return branch.pr ? `#${branch.pr.number}` : 'No PR';
 }
 
+/** gh-stack skips merged layers when navigating from an active branch.
+ * When already on a merged branch, it counts every layer instead. */
+export function navigation(stack: StackView, index: number): {
+  selectable: number[];
+  above?: number;
+  below?: number;
+  moveTo(targetIndex: number): { direction: 'up' | 'down'; steps: number } | undefined;
+} {
+  const selectable = stack.branches[index]?.isMerged
+    ? stack.branches.map((_, i) => i)
+    : stack.branches.flatMap((branch, i) => branch.isMerged ? [] : [i]);
+  const position = selectable.indexOf(index);
+  return {
+    selectable,
+    above: selectable[position + 1],
+    below: selectable[position - 1],
+    moveTo(targetIndex) {
+      const targetPosition = selectable.indexOf(targetIndex);
+      if (position < 0 || targetPosition < 0 || targetPosition === position) { return undefined; }
+      return {
+        direction: targetPosition > position ? 'up' : 'down',
+        steps: Math.abs(targetPosition - position)
+      };
+    }
+  };
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }

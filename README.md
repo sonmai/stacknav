@@ -6,7 +6,7 @@ When the current branch belongs to a locally loaded stack, the status bar shows:
 
 `↓  2/4 · #184  ↑`
 
-Click an arrow to move one layer. Click the middle to choose any layer from a VS Code Quick Pick; it moves the required number of local layers with `gh stack up/down`. At the top or bottom, the unavailable arrow is hidden.
+Click an arrow to move one layer. Click the middle to choose a layer from a VS Code Quick Pick; it moves the required number of local layers with `gh stack up/down`. When the current branch is active, merged layers are omitted because `gh-stack` skips them during navigation. The arrow tooltips show the next reachable layer. At the top or bottom, the unavailable arrow is hidden.
 
 When you check out a PR branch that has no local stack, StackNav offers **Load stack for #184**. This detects a PR on the current branch, but cannot establish whether the PR belongs to a remote stack until you click Load. Loading uses the PR URL with `gh stack checkout`, fetches its stack locally, and may switch your local branch. An ordinary PR without a stack will report an error in **Output → StackNav**.
 
@@ -18,6 +18,8 @@ When you check out a PR branch that has no local stack, StackNav offers **Load s
 
 The VS Code built-in Git extension must be enabled. In a workspace with multiple repositories, open a file from the desired repository to select it. StackNav requires a desktop VS Code extension host with access to `gh`.
 
+If the repository has multiple Git remotes, configure the intended one before loading a stack (for example, `git config remote.pushDefault origin`). If a different local stack already tracks those branches, resolve that conflict manually; StackNav does not unstack them.
+
 ## Commands
 
 - **StackNav: Load Stack for Current PR** — explicitly fetch a remote stack to local branches.
@@ -25,7 +27,7 @@ The VS Code built-in Git extension must be enabled. In a workspace with multiple
 - **StackNav: Select PR…** — choose a layer in the current local stack.
 - **StackNav: Refresh** — re-read the current stack and PR.
 
-The status bar refreshes after branch changes and StackNav actions. There is no polling and no default keyboard shortcut.
+The status bar refreshes after HEAD changes and StackNav actions, or when you run Refresh. Editing or saving a file does not trigger a stack lookup. There is no polling and no default keyboard shortcut.
 
 ## Safety
 

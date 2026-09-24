@@ -1,7 +1,5 @@
 import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
 
-const execFileAsync = promisify(execFile);
 const executable = process.platform === 'win32' ? 'gh.exe' : 'gh';
 
 export class CliError extends Error {
@@ -31,25 +29,27 @@ export class StackCli {
   }
 
   move(cwd: string, direction: 'up' | 'down', steps = 1): Promise<string> {
+    if (direction !== 'up' && direction !== 'down') { throw new Error('Invalid navigation direction'); }
     if (!Number.isSafeInteger(steps) || steps < 1) { throw new Error('Invalid step count'); }
     return this.runner(steps === 1 ? ['stack', direction] : ['stack', direction, String(steps)], cwd);
   }
 }
 
-async function runGh(args: readonly string[], cwd: string): Promise<string> {
-  try {
-    const { stdout } = await execFileAsync(executable, [...args], {
+function runGh(args: readonly string[], cwd: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const child = execFile(executable, [...args], {
       cwd,
       timeout: args[1] === 'checkout' ? 120_000 : 30_000,
       maxBuffer: 2 * 1024 * 1024,
       env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
       windowsHide: true
+    }, (error, stdout, stderr) => {
+      if (!error) { resolve(stdout); return; }
+      const failure = error as NodeJS.ErrnoException & { code?: string | number };
+      const exitCode = typeof failure.code === 'number' ? failure.code : undefined;
+      reject(new CliError((stderr || failure.message).trim(), exitCode, failure.code === 'ENOENT'));
     });
-    return stdout;
-  } catch (error) {
-    const failure = error as NodeJS.ErrnoException & { stdout?: string; stderr?: string; code?: string | number };
-    const exitCode = typeof failure.code === 'number' ? failure.code : undefined;
-    const detail = (failure.stderr || failure.message).trim();
-    throw new CliError(detail, exitCode, failure.code === 'ENOENT');
-  }
+    // gh-stack cannot wait for input from this extension's background process.
+    child.stdin?.end();
+  });
 }

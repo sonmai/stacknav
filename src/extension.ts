@@ -1,11 +1,14 @@
 import * as vscode from 'vscode';
 import { relative, isAbsolute, sep } from 'node:path';
 import { CliError, StackCli } from './cli';
-import { NavState, parseCurrentPr, parseStack, prLabel, StackBranch } from './core';
+import { NavState, navigation, parseCurrentPr, parseStack, prLabel, StackBranch } from './core';
 
 interface GitRepository {
   rootUri: vscode.Uri;
-  state: { onDidChange: vscode.Event<void> };
+  state: {
+    HEAD: { name?: string; commit?: string } | undefined;
+    onDidChange: vscode.Event<void>;
+  };
 }
 
 interface GitApi {
@@ -32,6 +35,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const git = await vscode.extensions.getExtension<GitExtension>('vscode.git')?.activate();
   const api = git?.getAPI(1);
   const repositoryListeners = new Map<GitRepository, vscode.Disposable>();
+  const observedHeads = new Map<GitRepository, string>();
   let state: NavState = { type: 'empty' };
   let stateRoot: string | undefined;
   let generation = 0;
@@ -83,24 +87,25 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }
     const { stack, index } = state;
     const current = stack.branches[index];
+    const targets = navigation(stack, index);
     center.text = `$(layers) ${index + 1}/${stack.branches.length} · ${prLabel(current)}`;
     center.tooltip = [
       `StackNav · ${index + 1} of ${stack.branches.length}`,
-      `Current: ${details(current)}`,
-      `Above: ${details(stack.branches[index + 1])}`,
-      `Below: ${details(stack.branches[index - 1])}`,
+      `Current: ${details(current)}${current.isMerged ? ' (merged)' : ''}`,
+      `Above: ${details(targets.above === undefined ? undefined : stack.branches[targets.above])}`,
+      `Below: ${details(targets.below === undefined ? undefined : stack.branches[targets.below])}`,
       `Trunk: ${stack.trunk}`
     ].join('\n');
     center.command = 'stacknav.select';
     center.show();
-    if (index > 0) {
+    if (targets.below !== undefined) {
       down.text = '$(arrow-down)';
-      down.tooltip = `Down to ${details(stack.branches[index - 1])}`;
+      down.tooltip = `Down to ${details(stack.branches[targets.below])}`;
       down.show();
     }
-    if (index < stack.branches.length - 1) {
+    if (targets.above !== undefined) {
       up.text = '$(arrow-up)';
-      up.tooltip = `Up to ${details(stack.branches[index + 1])}`;
+      up.tooltip = `Up to ${details(stack.branches[targets.above])}`;
       up.show();
     }
   }
@@ -138,7 +143,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         output.appendLine(`Stack view: ${String(error)}`);
         state = { type: 'error', message: error instanceof CliError && error.missingExecutable
           ? 'GitHub CLI (gh) was not found. Install it and click to retry.'
-          : 'Could not read the stack. Check Output → StackNav; click to retry.' };
+          : error instanceof CliError && error.exitCode === 6
+            ? 'This branch belongs to several stacks. Check out a PR branch unique to the stack, then refresh.'
+            : 'Could not read the stack. Check Output → StackNav; click to retry.' };
       }
       stateRoot = root;
       render();
@@ -151,7 +158,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   }
 
   function observe(repo: GitRepository): void {
-    repositoryListeners.set(repo, repo.state.onDidChange(scheduleRefresh));
+    const headKey = () => `${repo.state.HEAD?.name ?? ''}\0${repo.state.HEAD?.commit ?? ''}`;
+    observedHeads.set(repo, headKey());
+    repositoryListeners.set(repo, repo.state.onDidChange(() => {
+      const next = headKey();
+      if (next === observedHeads.get(repo)) { return; }
+      observedHeads.set(repo, next);
+      if (!busy) { scheduleRefresh(); }
+    }));
   }
 
   if (api) {
@@ -160,10 +174,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     context.subscriptions.push(api.onDidCloseRepository(repo => {
       repositoryListeners.get(repo)?.dispose();
       repositoryListeners.delete(repo);
+      observedHeads.delete(repo);
       scheduleRefresh();
     }));
   }
-  context.subscriptions.push(vscode.window.onDidChangeActiveTextEditor(scheduleRefresh));
+  context.subscriptions.push(vscode.window.onDidChangeActiveTextEditor(() => {
+    if (activeRepository()?.rootUri.fsPath !== stateRoot) { scheduleRefresh(); }
+  }));
   context.subscriptions.push({ dispose: () => {
     if (timer) { clearTimeout(timer); }
     for (const listener of repositoryListeners.values()) { listener.dispose(); }
@@ -174,22 +191,38 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     return root && root === stateRoot ? root : undefined;
   }
 
-  async function perform(label: string, action: (root: string) => Promise<string>): Promise<void> {
+  async function perform(label: string, action: (root: string) => Promise<string>, showProgress = false): Promise<void> {
     if (busy) { return; }
     const root = currentRoot();
     if (!root) { await refresh(); return; }
     busy = true;
+    let failure: unknown;
     try {
       output.appendLine(`${label} in ${root}`);
-      await action(root);
-      await refresh();
+      if (showProgress) {
+        await vscode.window.withProgress({
+          location: vscode.ProgressLocation.Notification,
+          title: 'StackNav: Loading stack for review…',
+          cancellable: false
+        }, () => action(root));
+      } else {
+        await action(root);
+      }
     } catch (error) {
       output.appendLine(`${label}: ${String(error)}`);
-      const choice = await vscode.window.showErrorMessage(`StackNav: ${label} failed. See Output for details.`, 'Show Output');
-      if (choice) { output.show(true); }
-      await refresh();
+      failure = error;
     } finally {
+      await refresh();
       busy = false;
+    }
+    if (failure) {
+      const detail = failure instanceof CliError && /different composition|already tracked/i.test(failure.message)
+        ? 'The local stack has a different composition. Resolve that conflict manually before loading.'
+        : failure instanceof CliError && /remote\.pushDefault|multiple remotes|choose.*remote/i.test(failure.message)
+          ? 'Set Git remote.pushDefault for this repository, then try again.'
+          : 'See Output for details.';
+      const choice = await vscode.window.showErrorMessage(`StackNav: ${label} failed. ${detail}`, 'Show Output');
+      if (choice) { output.show(true); }
     }
   }
 
@@ -198,48 +231,52 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     vscode.commands.registerCommand('stacknav.load', async () => {
       if (state.type !== 'unloaded') { return; }
       const url = state.pr.url;
-      await perform('Load stack', root => cli.load(root, url));
+      await perform('Load stack', root => cli.load(root, url), true);
     }),
     vscode.commands.registerCommand('stacknav.up', async () => {
-      if (state.type === 'loaded' && state.index < state.stack.branches.length - 1) {
+      if (state.type === 'loaded' && navigation(state.stack, state.index).above !== undefined) {
         await perform('Move up', root => cli.move(root, 'up'));
       }
     }),
     vscode.commands.registerCommand('stacknav.down', async () => {
-      if (state.type === 'loaded' && state.index > 0) {
+      if (state.type === 'loaded' && navigation(state.stack, state.index).below !== undefined) {
         await perform('Move down', root => cli.move(root, 'down'));
       }
     }),
     vscode.commands.registerCommand('stacknav.select', async () => {
       if (state.type !== 'loaded') { return; }
       const stack = state.stack;
+      const targets = navigation(stack, state.index);
       const selected = await vscode.window.showQuickPick(
-        [...stack.branches].reverse().map(branch => ({
-          label: `${branch.isCurrent ? '$(check)' : '$(circle-outline)'} ${prLabel(branch)} · ${branch.name}`,
-          description: branch.isCurrent ? 'Current' : undefined,
-          branch
-        })),
+        [...targets.selectable].reverse().map(index => {
+          const branch = stack.branches[index];
+          return {
+            index,
+            branch,
+            label: `${branch.isCurrent ? '$(check)' : '$(circle-outline)'} ${prLabel(branch)} · ${branch.name}`,
+            description: branch.isCurrent ? 'Current' : undefined
+          };
+        }),
         { placeHolder: `Select a PR layer · trunk: ${stack.trunk}` }
       );
       if (selected && !selected.branch.isCurrent) {
         await refresh();
         if (state.type !== 'loaded' || state.stack.currentBranch !== stack.currentBranch ||
             state.stack.branches.length !== stack.branches.length ||
-            state.stack.branches.some((branch, index) => branch.name !== stack.branches[index].name)) {
+            state.stack.branches.some((branch, index) =>
+              branch.name !== stack.branches[index].name || branch.isMerged !== stack.branches[index].isMerged)) {
           vscode.window.showInformationMessage('StackNav: The stack changed. Select the PR again.');
           return;
         }
-        const targetIndex = state.stack.branches.findIndex(branch => branch.name === selected.branch.name);
-        const steps = Math.abs(targetIndex - state.index);
-        if (steps > 0) {
-          const direction = targetIndex > state.index ? 'up' : 'down';
-          await perform('Switch PR', root => cli.move(root, direction, steps));
+        const move = navigation(state.stack, state.index).moveTo(selected.index);
+        if (move) {
+          await perform('Switch PR', root => cli.move(root, move.direction, move.steps));
         }
       }
     })
   );
 
-  await refresh();
+  void refresh();
 }
 
 export function deactivate(): void { /* Disposables are owned by the extension context. */ }
