@@ -69,10 +69,18 @@ export class StackCli {
   }
 }
 
+export function runGit(args: readonly string[], cwd: string, signal?: AbortSignal): Promise<string> {
+  return runCommand(process.platform === 'win32' ? 'git.exe' : 'git', args, cwd, signal);
+}
+
 function runGh(args: readonly string[], cwd: string, signal?: AbortSignal): Promise<string> {
+  return runCommand(executable, args, cwd, signal);
+}
+
+function runCommand(command: string, args: readonly string[], cwd: string, signal?: AbortSignal): Promise<string> {
   return new Promise((resolve, reject) => {
     signal?.throwIfAborted();
-    const child = execFile(executable, [...args], {
+    const child = execFile(command, [...args], {
       cwd,
       signal,
       timeout: args[1] === 'checkout' ? 120_000 : 30_000,

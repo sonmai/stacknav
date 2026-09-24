@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { StackCli } from '../src/cli';
+import { LocalStacks, parseLocalStacks } from '../src/localStacks';
+import { CliError, StackCli } from '../src/cli';
 
 function event() {
   const listeners = new Set<(...args: any[]) => void>();
@@ -41,6 +42,16 @@ test('host retains busy HEAD changes, replaces listeners, cancels stale reads an
   const calls: string[] = [], signals: AbortSignal[] = [];
   let holdRead = false;
   let allMerged = false;
+  let ambiguous = false;
+  const choices = parseLocalStacks(JSON.stringify({ schemaVersion: 1, stacks: [
+    { number: 1, trunk: { branch: 'main' }, branches: [{ branch: 'api' }] },
+    { number: 2, trunk: { branch: 'main' }, branches: [{ branch: 'ui' }] }
+  ] }), 'main');
+  const originalList = LocalStacks.prototype.list, originalEnter = LocalStacks.prototype.enter;
+  let entered: string | undefined;
+  LocalStacks.prototype.list = async () => choices;
+  LocalStacks.prototype.enter = async (_root, stack) => { entered = stack.branches[0].name; return 'ok'; };
+  window.showQuickPick = async (items: any[]) => items[1];
   const detailCalls: { url: string; body: boolean }[] = [];
   let finishMove: (() => void) | undefined;
   const payload = (root: string) => JSON.stringify({ trunk: 'main', currentBranch: root === '/a' ? 'main' : 'feature', branches: [
@@ -49,6 +60,7 @@ test('host retains busy HEAD changes, replaces listeners, cancels stale reads an
   ] });
   StackCli.prototype.view = async (root, signal) => {
     calls.push(root); signals.push(signal!);
+    if (ambiguous) { throw new CliError("multiple stacks", 6); }
     if (holdRead) { return new Promise((_resolve, reject) => signal!.addEventListener('abort', () => reject(signal!.reason))); }
     return payload(root);
   };
@@ -86,8 +98,21 @@ test('host retains busy HEAD changes, replaces listeners, cancels stale reads an
     await commands.get('stacknav.refresh')!(); await tick();
     assert.equal(bars[2].visible, false);
     assert.equal(bars[1].command, undefined);
+    ambiguous = true;
+    await commands.get('stacknav.refresh')!(); await tick();
+    assert.equal(bars[1].text, '$(layers) Select stack…');
+    await commands.get('stacknav.selectStack')!();
+    assert.equal(entered, 'ui');
+    entered = undefined;
+    window.showQuickPick = async () => undefined;
+    await commands.get('stacknav.selectStack')!();
+    assert.equal(entered, undefined);
+    window.showQuickPick = async (items: any[]) => { window.activeTextEditor.document.uri.fsPath = '/b/file'; return items[0]; };
+    await commands.get('stacknav.selectStack')!();
+    assert.equal(entered, undefined);
   } finally {
     for (const subscription of subscriptions) { subscription.dispose(); }
+    LocalStacks.prototype.list = originalList; LocalStacks.prototype.enter = originalEnter;
     StackCli.prototype.view = originalView; StackCli.prototype.prDetails = originalDetails; StackCli.prototype.firstLayer = originalFirst;
   }
   assert.equal(changedA.size, 0); assert.equal(changedB.size, 0);

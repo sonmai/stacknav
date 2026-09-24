@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { relative, isAbsolute, sep } from 'node:path';
 import { CliError, RepositoryMismatchError, StackCli } from './cli';
 import { NavState, navigation, normalizePrUrl, parseCurrentPr, parseStack, prLabel, prSummary, branchStatus, StackBranch, StackView } from './core';
+import { LocalStacks } from './localStacks';
 import { PrDetailsCache } from './prDetails';
 
 interface GitRepository {
@@ -27,6 +28,7 @@ interface GitExtension {
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   const output = vscode.window.createOutputChannel('StackNav');
   const cli = new StackCli();
+  const localStacks = new LocalStacks();
   const titles = new PrDetailsCache(async (root, url, includeBody, signal) => {
     try { return await cli.prDetails(root, url, includeBody, signal); }
     catch (error) {
@@ -127,6 +129,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       center.show();
       return;
     }
+    if (state.type === 'stacks') {
+      center.text = '$(layers) Select stack…';
+      center.tooltip = `${state.choices.length} stacks on ${state.choices[0].trunk}`;
+      center.command = 'stacknav.selectStack';
+      center.show();
+      return;
+    }
     if (state.type === 'trunk') {
       const first = state.stack.branches.find(branch => !branch.isMerged);
       center.text = '$(layers) Trunk';
@@ -192,7 +201,18 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       if (next.type === 'loaded' || next.type === 'trunk') { void loadTitles(next.stack, root, ticket, signal); }
     } catch (error) {
       if (signal.aborted || ticket !== generation) { return; }
-      if (error instanceof CliError && error.exitCode === 2) {
+      if (error instanceof CliError && error.exitCode === 6) {
+        try {
+          const choices = await localStacks.list(root, signal);
+          if (signal.aborted || ticket !== generation) { return; }
+          state = choices.length ? { type: 'stacks', choices }
+            : { type: 'error', message: 'This branch belongs to multiple stacks. Check out a branch unique to a stack.' };
+        } catch (listError) {
+          if (signal.aborted || ticket !== generation) { return; }
+          output.appendLine(`List stacks: ${String(listError)}`);
+          state = { type: 'error', message: 'Could not list local stacks. Check Output → StackNav, or check out a PR branch manually.' };
+        }
+      } else if (error instanceof CliError && error.exitCode === 2) {
         try {
           const pr = parseCurrentPr(await cli.currentPr(root, signal));
           if (signal.aborted || ticket !== generation) { return; }
@@ -334,6 +354,28 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       if (state.type !== 'unloaded') { return; }
       const url = state.pr.url;
       await perform('Load stack', root => cli.load(root, url), true);
+    }),
+    vscode.commands.registerCommand('stacknav.selectStack', async () => {
+      if (busy || state.type !== 'stacks') { return; }
+      const root = currentRoot();
+      if (!root) { await refresh(); return; }
+      const items = state.choices.flatMap(stack => {
+        const first = stack.branches.find(branch => !branch.merged);
+        return first ? [{
+          label: stack.number ? `Stack #${stack.number}` : first.name,
+          description: `${stack.branches.filter(branch => !branch.merged).length} active layers`,
+          detail: `${first.prNumber ? `#${first.prNumber} · ` : ''}${first.name}`, stack
+        }] : [];
+      });
+      if (!items.length) {
+        void vscode.window.showInformationMessage('StackNav: All layers in these stacks are merged.'); return;
+      }
+      const selected = await vscode.window.showQuickPick(items, { placeHolder: 'Select a stack to enter its first active layer', matchOnDetail: true });
+      if (!selected) { return; }
+      if (activeRepository()?.rootUri.fsPath !== root) {
+        void vscode.window.showInformationMessage('StackNav: The active repository changed. Select the stack again.'); return;
+      }
+      await perform('Enter stack', cwd => localStacks.enter(cwd, selected.stack), false, root);
     }),
     vscode.commands.registerCommand('stacknav.first', async () => {
       if (state.type === 'trunk' && state.stack.branches.some(branch => !branch.isMerged)) {

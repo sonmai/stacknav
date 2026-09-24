@@ -14,7 +14,7 @@ You can also run **StackNav: Load Stack from PR URL…** and paste a PR link wit
 
 Titles load for the stack in the background, with at most four lookups at once. Only the current layer requests a description; only its short preview is retained. Titles and previews are cached for five minutes during the session. If a title lookup fails, PR number and branch name remain available; navigation does not wait for titles. **StackNav: Refresh** clears the title cache.
 
-The middle item and picker rows show short `merged`, `queued`, and `needs rebase` suffixes when applicable. On trunk, StackNav stays visible and offers **Go to First Layer** for the first unmerged layer. If all layers are merged, it shows trunk without a checkout action.
+The middle item and picker rows show short `merged`, `queued`, and `needs rebase` suffixes when applicable. On trunk, StackNav stays visible and offers **Go to First Layer** for the first unmerged layer. If all layers are merged, it shows trunk without a checkout action. When multiple local stacks share the trunk, **Select stack…** opens a picker and checks out the chosen stack’s first unmerged branch. Cancel leaves the checkout unchanged. StackNav rechecks the selection before switching.
 
 ## Setup
 
@@ -31,6 +31,7 @@ If the repository has multiple Git remotes, configure the intended one before lo
 - **StackNav: Load Stack for Current PR** — explicitly fetch a remote stack to local branches.
 - **StackNav: Load Stack from PR URL…** — fetch and check out a stack from a pasted PR link.
 - **StackNav: Up** and **StackNav: Down** — switch between adjacent layers.
+- **StackNav: Select Stack…** — choose among local stacks sharing the current trunk.
 - **StackNav: Go to First Layer** — from trunk, enter the first unmerged layer with one `gh stack up` call.
 - **StackNav: Select PR…** — choose a layer in the current local stack.
 - **StackNav: Refresh** — re-read the current stack and PR.
@@ -39,7 +40,7 @@ The status bar refreshes after HEAD changes and StackNav actions, or when you ru
 
 ## Safety
 
-StackNav never calls `gh stack sync`, `push`, `submit`, `rebase`, or any command that writes remote branches or PRs. It uses `gh stack view --json` and `gh pr view --json` to display state, and `gh repo view --json url` to check repository identity before loading. Loading a remote stack with `gh stack checkout <PR URL>` fetches branches and sets up local tracking; navigation changes the local checkout. `gh stack view --json` may refresh PR status in local metadata. StackNav never stashes, resets, or forces a checkout. If a switch cannot safely carry local edits across, it reports the error.
+StackNav never calls `gh stack sync`, `push`, `submit`, `rebase`, or any command that writes remote branches or PRs. It uses `gh stack view --json` and `gh pr view --json` to display state, and `gh repo view --json url` to check repository identity before loading. Loading a remote stack with `gh stack checkout <PR URL>` fetches branches and sets up local tracking; navigation changes the local checkout. `gh stack view --json` may refresh PR status in local metadata. The multi-stack picker reads gh-stack schema-v1 metadata from Git’s resolved directory without modifying it, then uses `git switch --no-guess -- <branch>` for the selected local branch. Unsupported metadata produces an error rather than guessing. StackNav never stashes, resets, or forces a checkout. If a switch cannot safely carry local edits across, it reports the error.
 
 ## Automatic releases
 

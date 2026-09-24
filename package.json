@@ -48,6 +48,10 @@
       {
         "command": "stacknav.first",
         "title": "StackNav: Go to First Layer"
+      },
+      {
+        "command": "stacknav.selectStack",
+        "title": "StackNav: Select Stack\u2026"
       }
     ]
   },

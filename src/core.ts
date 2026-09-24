@@ -1,3 +1,4 @@
+import type { LocalStack } from './localStacks';
 export interface StackBranch {
   name: string;
   isCurrent: boolean;
@@ -22,6 +23,7 @@ export type NavState =
   | { type: 'empty' }
   | { type: 'error'; message: string }
   | { type: 'unloaded'; pr: CurrentPr }
+  | { type: 'stacks'; choices: LocalStack[] }
   | { type: 'trunk'; stack: StackView }
   | { type: 'loaded'; stack: StackView; index: number };
 
