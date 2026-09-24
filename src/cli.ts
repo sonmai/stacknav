@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process';
+import { PrDetails } from './prDetails';
 import { normalizePrUrl } from './core';
 
 const executable = process.platform === 'win32' ? 'gh.exe' : 'gh';
@@ -46,12 +47,14 @@ export class StackCli {
     return this.runner(['stack', 'checkout', prUrl], cwd);
   }
 
-  async prTitle(cwd: string, prUrl: string): Promise<string> {
-    const value: unknown = JSON.parse(await this.runner(['pr', 'view', normalizePrUrl(prUrl), '--json', 'title'], cwd));
+  async prDetails(cwd: string, prUrl: string): Promise<PrDetails> {
+    const value: unknown = JSON.parse(await this.runner(['pr', 'view', normalizePrUrl(prUrl), '--json', 'title,body'], cwd));
     if (!value || typeof value !== 'object' || !('title' in value) || typeof value.title !== 'string') {
-      throw new Error('Unexpected PR title response');
+      throw new Error('Unexpected PR details response');
     }
-    return value.title.replace(/[\r\n]+/g, ' ').trim();
+    const body = ('body' in value ? value.body : undefined) ?? '';
+    if (typeof body !== 'string') { throw new Error('Unexpected PR details response'); }
+    return { title: value.title.replace(/[\r\n]+/g, ' ').trim(), body };
   }
 
   move(cwd: string, direction: 'up' | 'down', steps = 1): Promise<string> {

@@ -6,13 +6,13 @@ When the current branch belongs to a locally loaded stack, the status bar shows:
 
 `↓  2/4 · #184  ↑`
 
-Click an arrow to move one layer. Click the middle to choose a layer from a VS Code Quick Pick; it moves the required number of local layers with `gh stack up/down`. When the current branch is active, merged layers are omitted because `gh-stack` skips them during navigation. The picker and tooltips show **PR number + title**, with the branch name underneath. The arrow tooltips show the next reachable PR. At the top or bottom, the unavailable arrow is hidden.
+Click an arrow to move one layer. Click the middle to choose a layer from a VS Code Quick Pick; it moves the required number of local layers with `gh stack up/down`. When the current branch is active, merged layers are omitted because `gh-stack` skips them during navigation. The picker and tooltips show **PR number + title**, with the branch name underneath in the picker. The middle tooltip shows only the stack position, current PR number and title, and the first three non-empty description lines (up to 400 characters). The arrow tooltips show the next reachable PR. At the top or bottom, the unavailable arrow is hidden.
 
 When you check out a PR branch that has no local stack, StackNav offers **Load stack for #184**. This detects a PR on the current branch, but cannot establish whether the PR belongs to a remote stack until you click Load. Loading uses the PR URL with `gh stack checkout`, fetches its stack locally, and may switch your local branch. An ordinary PR without a stack will report an error in **Output → StackNav**.
 
 You can also run **StackNav: Load Stack from PR URL…** and paste a PR link without first checking out its branch. Links to the Files, Commits, and Checks tabs are accepted. Before checkout, StackNav checks the PR URL’s host and owner/repository against the repository resolved by GitHub CLI in the selected local folder. A mismatch or failed lookup stops loading. The command uses the active local repository, or asks you to choose one when there is no active repository in a multi-repository workspace.
 
-PR titles load in the background and are cached for five minutes during the session. If a title lookup fails, PR number and branch name remain available; navigation does not wait for titles. **StackNav: Refresh** clears the title cache.
+PR titles and descriptions load together in the background and are cached for five minutes during the session. If a title lookup fails, PR number and branch name remain available; navigation does not wait for titles. **StackNav: Refresh** clears the title cache.
 
 ## Setup
 

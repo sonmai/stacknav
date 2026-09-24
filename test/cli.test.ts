@@ -10,12 +10,12 @@ test('every command stays within the reviewer navigation allowlist', async () =>
   const cli = new StackCli(async args => {
     calls.push([...args]);
     if (args[0] === 'repo') { return '{"url":"https://github.com/o/r"}'; }
-    if (args.includes('title')) { return '{"title":"Add API"}'; }
+    if (args.includes('title,body')) { return '{"title":"Add API","body":"Description"}'; }
     return '{}';
   });
   await cli.view('/repo');
   await cli.currentPr('/repo');
-  await cli.prTitle('/repo', 'https://github.com/o/r/pull/184');
+  await cli.prDetails('/repo', 'https://github.com/o/r/pull/184');
   await cli.load('/repo', 'https://github.com/o/r/pull/184');
   await cli.move('/repo', 'up');
   await cli.move('/repo', 'down');
@@ -23,7 +23,7 @@ test('every command stays within the reviewer navigation allowlist', async () =>
   assert.deepEqual(calls, [
     ['stack', 'view', '--json'],
     ['pr', 'view', '--json', 'number,url'],
-    ['pr', 'view', 'https://github.com/o/r/pull/184', '--json', 'title'],
+    ['pr', 'view', 'https://github.com/o/r/pull/184', '--json', 'title,body'],
     ['repo', 'view', '--json', 'url'],
     ['stack', 'checkout', 'https://github.com/o/r/pull/184'],
     ['stack', 'up'],

@@ -1,8 +1,8 @@
 import * as vscode from 'vscode';
 import { relative, isAbsolute, sep } from 'node:path';
 import { CliError, RepositoryMismatchError, StackCli } from './cli';
-import { NavState, navigation, normalizePrUrl, parseCurrentPr, parseStack, prLabel, prSummary, StackBranch, StackView } from './core';
-import { PrTitles } from './prTitles';
+import { NavState, navigation, normalizePrUrl, parseCurrentPr, parseStack, prLabel, prSummary, descriptionPreview, StackBranch, StackView } from './core';
+import { PrDetailsCache } from './prDetails';
 
 interface GitRepository {
   rootUri: vscode.Uri;
@@ -25,9 +25,9 @@ interface GitExtension {
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   const output = vscode.window.createOutputChannel('StackNav');
   const cli = new StackCli();
-  const titles = new PrTitles(async (root, url) => {
-    try { return await cli.prTitle(root, url); }
-    catch (error) { output.appendLine(`PR title lookup: ${String(error)}`); throw error; }
+  const titles = new PrDetailsCache(async (root, url) => {
+    try { return await cli.prDetails(root, url); }
+    catch (error) { output.appendLine(`PR details lookup: ${String(error)}`); throw error; }
   });
   const down = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 102);
   const center = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 101);
@@ -75,7 +75,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   function details(branch: StackBranch | undefined): string {
     if (!branch) { return '—'; }
-    const title = branch.pr && titles.peek(branch.pr.url);
+    const title = branch.pr && titles.peek(branch.pr.url)?.title;
     return `${prSummary(branch, title)}${title ? `\n${branch.name}` : ''}`;
   }
 
@@ -85,7 +85,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       const batch = prs.slice(i, i + 4);
       const before = batch.map(pr => titles.peek(pr.url));
       await Promise.all(batch.map(pr => titles.get(root, pr.url)));
-      const changed = batch.some((pr, index) => titles.peek(pr.url) !== before[index]);
+      const changed = batch.some((pr, index) => (titles.peek(pr.url)?.title !== before[index]?.title || titles.peek(pr.url)?.body !== before[index]?.body));
       if (changed && !disposed && ticket === generation && stateRoot === root) {
         render();
         updatePicker?.();
@@ -114,13 +114,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     const current = stack.branches[index];
     const targets = navigation(stack, index);
     center.text = `$(layers) ${index + 1}/${stack.branches.length} · ${prLabel(current)}`;
-    center.tooltip = [
-      `StackNav · ${index + 1} of ${stack.branches.length}`,
-      `Current: ${details(current)}${current.isMerged ? ' (merged)' : ''}`,
-      `Above: ${details(targets.above === undefined ? undefined : stack.branches[targets.above])}`,
-      `Below: ${details(targets.below === undefined ? undefined : stack.branches[targets.below])}`,
-      `Trunk: ${stack.trunk}`
-    ].join('\n');
+    const metadata = current.pr && titles.peek(current.pr.url);
+    const preview = descriptionPreview(metadata?.body ?? '');
+    center.tooltip = `${index + 1}/${stack.branches.length}\n${prSummary(current, metadata?.title)}${preview ? `\n\n${preview}` : ''}`;
     center.command = 'stacknav.select';
     center.show();
     if (targets.below !== undefined) {
@@ -309,7 +305,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           return {
             index,
             branch,
-            label: `${branch.isCurrent ? '$(check)' : '$(circle-outline)'} ${prSummary(branch, branch.pr && titles.peek(branch.pr.url))}`,
+            label: `${branch.isCurrent ? '$(check)' : '$(circle-outline)'} ${prSummary(branch, branch.pr && titles.peek(branch.pr.url)?.title)}`,
             description: `${index + 1}/${stack.branches.length}${branch.isCurrent ? ' · Current' : ''}`,
             detail: branch.name
           };
