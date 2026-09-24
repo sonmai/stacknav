@@ -28,6 +28,26 @@ test('title lookup uses a normalized explicit URL and validates payload', async 
   await assert.rejects(new StackCli(async () => '{}').prDetails('/repo', 'https://github.com/o/r/pull/184'), /Unexpected/);
 });
 
+test('preserves the title when the description is null, missing or empty', async () => {
+  for (const body of [null, undefined, '']) {
+    const cli = new StackCli(async () => JSON.stringify({ title: 'Add API', body }));
+    assert.deepEqual(await cli.prDetails('/repo', 'https://github.com/o/r/pull/184'), {
+      title: 'Add API', body: ''
+    });
+  }
+});
+
+test('still rejects invalid title and non-null body types', async () => {
+  for (const value of [
+    { title: null, body: '' }, { title: 1 }, { body: '' },
+    { title: 'Add API', body: 1 }, { title: 'Add API', body: false },
+    { title: 'Add API', body: {} }, { title: 'Add API', body: [] }
+  ]) {
+    const cli = new StackCli(async () => JSON.stringify(value));
+    await assert.rejects(cli.prDetails('/repo', 'https://github.com/o/r/pull/184'), /Unexpected/);
+  }
+});
+
 test('deduplicates lookups, isolates URLs, expires and clears cached titles', async () => {
   let now = 0;
   let calls = 0;

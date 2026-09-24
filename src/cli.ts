@@ -49,10 +49,12 @@ export class StackCli {
 
   async prDetails(cwd: string, prUrl: string): Promise<PrDetails> {
     const value: unknown = JSON.parse(await this.runner(['pr', 'view', normalizePrUrl(prUrl), '--json', 'title,body'], cwd));
-    if (!value || typeof value !== 'object' || !('title' in value) || typeof value.title !== 'string' || !('body' in value) || typeof value.body !== 'string') {
+    if (!value || typeof value !== 'object' || !('title' in value) || typeof value.title !== 'string') {
       throw new Error('Unexpected PR details response');
     }
-    return { title: value.title.replace(/[\r\n]+/g, ' ').trim(), body: value.body };
+    const body = ('body' in value ? value.body : undefined) ?? '';
+    if (typeof body !== 'string') { throw new Error('Unexpected PR details response'); }
+    return { title: value.title.replace(/[\r\n]+/g, ' ').trim(), body };
   }
 
   move(cwd: string, direction: 'up' | 'down', steps = 1): Promise<string> {
