@@ -113,3 +113,11 @@ export function navigation(stack: StackView, index: number): {
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
+
+/** Keep the tooltip preview short even when a PR body is one long paragraph. */
+export function descriptionPreview(body: string): string {
+  const lines = body.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+  const opening = lines.slice(0, 3).join('\n');
+  const clipped = opening.slice(0, 400).trimEnd();
+  return clipped + (lines.length > 3 || opening.length > 400 ? '…' : '');
+}

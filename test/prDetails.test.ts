@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { PrTitles } from '../src/prTitles';
-import { normalizePrUrl, prSummary, StackBranch } from '../src/core';
+import { PrDetailsCache } from '../src/prDetails';
+import { normalizePrUrl, descriptionPreview, prSummary, StackBranch } from '../src/core';
 import { StackCli } from '../src/cli';
 
 test('normalizes pasted PR tab links and rejects ambiguous input', () => {
@@ -21,24 +21,24 @@ test('shows title when available and branch fallback otherwise', () => {
 
 test('title lookup uses a normalized explicit URL and validates payload', async () => {
   const cli = new StackCli(async args => {
-    assert.deepEqual(args, ['pr', 'view', 'https://github.com/o/r/pull/184', '--json', 'title']);
-    return JSON.stringify({ title: 'Add\nAPI' });
+    assert.deepEqual(args, ['pr', 'view', 'https://github.com/o/r/pull/184', '--json', 'title,body']);
+    return JSON.stringify({ title: 'Add\nAPI', body: 'Description' });
   });
-  assert.equal(await cli.prTitle('/repo', 'https://github.com/o/r/pull/184/files'), 'Add API');
-  await assert.rejects(new StackCli(async () => '{}').prTitle('/repo', 'https://github.com/o/r/pull/184'), /Unexpected/);
+  assert.deepEqual(await cli.prDetails('/repo', 'https://github.com/o/r/pull/184/files'), { title: 'Add API', body: 'Description' });
+  await assert.rejects(new StackCli(async () => '{}').prDetails('/repo', 'https://github.com/o/r/pull/184'), /Unexpected/);
 });
 
 test('deduplicates lookups, isolates URLs, expires and clears cached titles', async () => {
   let now = 0;
   let calls = 0;
-  const cache = new PrTitles(async (_cwd, url) => { calls++; return url; }, () => now);
+  const cache = new PrDetailsCache(async (_cwd, url) => { calls++; return { title: url, body: '' }; }, () => now);
   const first = cache.get('/repo', 'a');
   assert.equal(cache.get('/repo', 'a'), first);
   await first;
   await cache.get('/repo', 'a');
   await cache.get('/repo', 'b');
   assert.equal(calls, 2);
-  assert.equal(cache.peek('a'), 'a');
+  assert.equal(cache.peek('a')?.title, 'a');
   now = 300_001;
   await cache.get('/repo', 'a');
   assert.equal(calls, 3);
@@ -51,10 +51,17 @@ test('deduplicates lookups, isolates URLs, expires and clears cached titles', as
 test('failed lookups fall back and retry after a short cooldown', async () => {
   let now = 0;
   let calls = 0;
-  const cache = new PrTitles(async () => { if (++calls === 1) { throw new Error('offline'); } return 'Recovered'; }, () => now);
+  const cache = new PrDetailsCache(async () => { if (++calls === 1) { throw new Error('offline'); } return { title: 'Recovered', body: '' }; }, () => now);
   assert.equal(await cache.get('/repo', 'a'), undefined);
   assert.equal(await cache.get('/repo', 'a'), undefined);
   assert.equal(calls, 1);
   now = 30_001;
-  assert.equal(await cache.get('/repo', 'a'), 'Recovered');
+  assert.equal((await cache.get('/repo', 'a'))?.title, 'Recovered');
+});
+
+
+test('description preview handles empty bodies and caps lines and long paragraphs', () => {
+  assert.equal(descriptionPreview('  '), '');
+  assert.equal(descriptionPreview(' First\r\n\r\nSecond\r\nThird\r\nFourth'), 'First\nSecond\nThird…');
+  assert.equal(descriptionPreview('a'.repeat(401)), 'a'.repeat(400) + '…');
 });
