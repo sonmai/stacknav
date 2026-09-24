@@ -26,6 +26,10 @@
         "title": "StackNav: Load Stack for Current PR"
       },
       {
+        "command": "stacknav.loadUrl",
+        "title": "StackNav: Load Stack from PR URL\u2026"
+      },
+      {
         "command": "stacknav.up",
         "title": "StackNav: Up"
       },
@@ -35,7 +39,7 @@
       },
       {
         "command": "stacknav.select",
-        "title": "StackNav: Select PR…"
+        "title": "StackNav: Select PR\u2026"
       },
       {
         "command": "stacknav.refresh",

@@ -1,7 +1,8 @@
 import * as vscode from 'vscode';
 import { relative, isAbsolute, sep } from 'node:path';
 import { CliError, StackCli } from './cli';
-import { NavState, navigation, parseCurrentPr, parseStack, prLabel, StackBranch } from './core';
+import { NavState, navigation, normalizePrUrl, parseCurrentPr, parseStack, prLabel, prSummary, StackBranch, StackView } from './core';
+import { PrTitles } from './prTitles';
 
 interface GitRepository {
   rootUri: vscode.Uri;
@@ -24,6 +25,10 @@ interface GitExtension {
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   const output = vscode.window.createOutputChannel('StackNav');
   const cli = new StackCli();
+  const titles = new PrTitles(async (root, url) => {
+    try { return await cli.prTitle(root, url); }
+    catch (error) { output.appendLine(`PR title lookup: ${String(error)}`); throw error; }
+  });
   const down = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 102);
   const center = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 101);
   const up = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
@@ -41,6 +46,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   let generation = 0;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let busy = false;
+  let selectedRepository: GitRepository | undefined;
+  let updatePicker: (() => void) | undefined;
+  let disposed = false;
 
   function activeRepository(): GitRepository | undefined {
     if (!api) { return undefined; }
@@ -55,7 +63,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         return candidates.sort((a, b) => b.rootUri.fsPath.length - a.rootUri.fsPath.length)[0];
       }
     }
-    return api.repositories.length === 1 ? api.repositories[0] : undefined;
+    return api.repositories.length === 1 ? api.repositories[0]
+      : selectedRepository && api.repositories.includes(selectedRepository) ? selectedRepository : undefined;
   }
 
   function hide(): void {
@@ -65,7 +74,20 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   }
 
   function details(branch: StackBranch | undefined): string {
-    return branch ? `${prLabel(branch)} · ${branch.name}` : '—';
+    if (!branch) { return '—'; }
+    const title = branch.pr && titles.peek(branch.pr.url);
+    return `${prSummary(branch, title)}${title ? `\n${branch.name}` : ''}`;
+  }
+
+  async function loadTitles(stack: StackView, root: string, ticket: number): Promise<void> {
+    const prs = stack.branches.flatMap(branch => branch.pr ? [branch.pr] : []);
+    for (let i = 0; i < prs.length && !disposed && ticket === generation; i += 4) {
+      await Promise.all(prs.slice(i, i + 4).map(pr => titles.get(root, pr.url)));
+      if (!disposed && ticket === generation && stateRoot === root) {
+        render();
+        updatePicker?.();
+      }
+    }
   }
 
   function render(): void {
@@ -100,17 +122,18 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     center.show();
     if (targets.below !== undefined) {
       down.text = '$(arrow-down)';
-      down.tooltip = `Down to ${details(stack.branches[targets.below])}`;
+      down.tooltip = `Previous: ${details(stack.branches[targets.below])}`;
       down.show();
     }
     if (targets.above !== undefined) {
       up.text = '$(arrow-up)';
-      up.tooltip = `Up to ${details(stack.branches[targets.above])}`;
+      up.tooltip = `Next: ${details(stack.branches[targets.above])}`;
       up.show();
     }
   }
 
   async function refresh(): Promise<void> {
+    if (disposed) { return; }
     const ticket = ++generation;
     const repo = activeRepository();
     const root = repo?.rootUri.fsPath;
@@ -127,6 +150,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       state = next;
       stateRoot = root;
       render();
+      if (next.type === 'loaded') { void loadTitles(next.stack, root, ticket); }
     } catch (error) {
       if (ticket !== generation) { return; }
       if (error instanceof CliError && error.exitCode === 2) {
@@ -182,6 +206,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     if (activeRepository()?.rootUri.fsPath !== stateRoot) { scheduleRefresh(); }
   }));
   context.subscriptions.push({ dispose: () => {
+    disposed = true;
+    ++generation;
     if (timer) { clearTimeout(timer); }
     for (const listener of repositoryListeners.values()) { listener.dispose(); }
   } });
@@ -191,9 +217,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     return root && root === stateRoot ? root : undefined;
   }
 
-  async function perform(label: string, action: (root: string) => Promise<string>, showProgress = false): Promise<void> {
+  async function perform(label: string, action: (root: string) => Promise<string>, showProgress = false, explicitRoot?: string): Promise<void> {
     if (busy) { return; }
-    const root = currentRoot();
+    const root = explicitRoot ?? currentRoot();
     if (!root) { await refresh(); return; }
     busy = true;
     let failure: unknown;
@@ -227,7 +253,32 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   }
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('stacknav.refresh', refresh),
+    vscode.commands.registerCommand('stacknav.refresh', () => { titles.clear(); return refresh(); }),
+    vscode.commands.registerCommand('stacknav.loadUrl', async () => {
+      if (busy) { return; }
+      let repo = activeRepository();
+      if (!repo && api?.repositories.length) {
+        const chosen = await vscode.window.showQuickPick(api.repositories.map(repository => ({
+          label: repository.rootUri.fsPath, repository
+        })), { placeHolder: 'Choose the local repository for this PR stack' });
+        if (!chosen) { return; }
+        repo = chosen.repository;
+        selectedRepository = repo;
+      }
+      if (!repo) { vscode.window.showInformationMessage('StackNav: Open a local Git repository first.'); return; }
+      const root = repo.rootUri.fsPath;
+      const input = await vscode.window.showInputBox({
+        title: 'Load Stack from PR URL',
+        prompt: `Fetch and check out the PR stack in ${root}`,
+        placeHolder: 'https://github.com/owner/repo/pull/184',
+        validateInput: value => {
+          try { normalizePrUrl(value); return undefined; }
+          catch (error) { return (error as Error).message; }
+        }
+      });
+      if (input === undefined) { return; }
+      await perform('Load stack', cwd => cli.load(cwd, normalizePrUrl(input)), true, root);
+    }),
     vscode.commands.registerCommand('stacknav.load', async () => {
       if (state.type !== 'unloaded') { return; }
       const url = state.pr.url;
@@ -247,21 +298,38 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       if (state.type !== 'loaded') { return; }
       const stack = state.stack;
       const targets = navigation(stack, state.index);
-      const selected = await vscode.window.showQuickPick(
-        [...targets.selectable].reverse().map(index => {
+      if (busy || updatePicker) { return; }
+      const pickerRoot = currentRoot();
+      const items = () => [...targets.selectable].reverse().map(index => {
           const branch = stack.branches[index];
           return {
             index,
             branch,
-            label: `${branch.isCurrent ? '$(check)' : '$(circle-outline)'} ${prLabel(branch)} · ${branch.name}`,
-            description: branch.isCurrent ? 'Current' : undefined
+            label: `${branch.isCurrent ? '$(check)' : '$(circle-outline)'} ${prSummary(branch, branch.pr && titles.peek(branch.pr.url))}`,
+            description: `${index + 1}/${stack.branches.length}${branch.isCurrent ? ' · Current' : ''}`,
+            detail: branch.name
           };
-        }),
-        { placeHolder: `Select a PR layer · trunk: ${stack.trunk}` }
-      );
+        });
+      const picker = vscode.window.createQuickPick<ReturnType<typeof items>[number]>();
+      picker.placeholder = `Select a PR layer · trunk: ${stack.trunk}`;
+      picker.matchOnDetail = true;
+      picker.items = items();
+      updatePicker = () => {
+        const focused = picker.activeItems[0]?.index;
+        picker.items = items();
+        const active = picker.items.find(item => item.index === focused);
+        if (active) { picker.activeItems = [active]; }
+      };
+      const selected = await new Promise<ReturnType<typeof items>[number] | undefined>(resolve => {
+        const accepted = picker.onDidAccept(() => { resolve(picker.selectedItems[0]); picker.hide(); });
+        const hidden = picker.onDidHide(() => {
+          resolve(undefined); accepted.dispose(); hidden.dispose(); picker.dispose(); updatePicker = undefined;
+        });
+        picker.show();
+      });
       if (selected && !selected.branch.isCurrent) {
         await refresh();
-        if (state.type !== 'loaded' || state.stack.currentBranch !== stack.currentBranch ||
+        if (currentRoot() !== pickerRoot || state.type !== 'loaded' || state.stack.currentBranch !== stack.currentBranch ||
             state.stack.branches.length !== stack.branches.length ||
             state.stack.branches.some((branch, index) =>
               branch.name !== stack.branches[index].name || branch.isMerged !== stack.branches[index].isMerged)) {

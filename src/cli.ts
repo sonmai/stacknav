@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process';
+import { normalizePrUrl } from './core';
 
 const executable = process.platform === 'win32' ? 'gh.exe' : 'gh';
 
@@ -22,10 +23,15 @@ export class StackCli {
   }
 
   load(cwd: string, prUrl: string): Promise<string> {
-    if (!/^https:\/\/[^/]+\/[^/]+\/[^/]+\/pull\/\d+$/.test(prUrl)) {
-      throw new Error('Invalid PR URL');
+    return this.runner(['stack', 'checkout', normalizePrUrl(prUrl)], cwd);
+  }
+
+  async prTitle(cwd: string, prUrl: string): Promise<string> {
+    const value: unknown = JSON.parse(await this.runner(['pr', 'view', normalizePrUrl(prUrl), '--json', 'title'], cwd));
+    if (!value || typeof value !== 'object' || !('title' in value) || typeof value.title !== 'string') {
+      throw new Error('Unexpected PR title response');
     }
-    return this.runner(['stack', 'checkout', prUrl], cwd);
+    return value.title.replace(/[\r\n]+/g, ' ').trim();
   }
 
   move(cwd: string, direction: 'up' | 'down', steps = 1): Promise<string> {

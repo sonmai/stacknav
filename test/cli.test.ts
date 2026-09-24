@@ -30,7 +30,7 @@ test('every command stays within the reviewer navigation allowlist', async () =>
 test('rejects unsafe or ambiguous checkout arguments', async () => {
   let calls = 0;
   const cli = new StackCli(async () => { calls++; return ''; });
-  assert.throws(() => cli.load('/repo', '184'), /Invalid PR URL/);
+  assert.throws(() => cli.load('/repo', '184'), /full HTTPS PR URL/);
   assert.throws(() => cli.move('/repo', 'up', 0), /Invalid step count/);
   assert.throws(() => cli.move('/repo', 'sync' as 'up', 1), /Invalid navigation direction/);
   assert.equal(calls, 0);

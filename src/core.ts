@@ -68,6 +68,21 @@ export function prLabel(branch: StackBranch): string {
   return branch.pr ? `#${branch.pr.number}` : 'No PR';
 }
 
+export function prSummary(branch: StackBranch, title?: string): string {
+  return `${prLabel(branch)} — ${title || branch.name}`;
+}
+
+export function normalizePrUrl(input: string): string {
+  try {
+    const url = new URL(input.trim());
+    const match = /^(\/[^/]+\/[^/]+\/pull\/[1-9]\d*)(?:\/(?:files|commits|checks))?\/?$/.exec(url.pathname);
+    if (url.protocol !== 'https:' || url.username || url.password || !match) { throw new Error(); }
+    return `${url.origin}${match[1]}`;
+  } catch {
+    throw new Error('Enter a full HTTPS PR URL, such as https://github.com/owner/repo/pull/184');
+  }
+}
+
 /** gh-stack skips merged layers when navigating from an active branch.
  * When already on a merged branch, it counts every layer instead. */
 export function navigation(stack: StackView, index: number): {
