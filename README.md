@@ -33,6 +33,14 @@ The status bar refreshes after HEAD changes and StackNav actions, or when you ru
 
 StackNav never calls `gh stack sync`, `push`, `submit`, `rebase`, or any command that writes remote branches or PRs. It uses `gh stack view --json` and `gh pr view --json` to display state. Loading a remote stack with `gh stack checkout <PR URL>` fetches branches and sets up local tracking; navigation changes the local checkout. `gh stack view --json` may refresh PR status in local metadata. StackNav never stashes, resets, or forces a checkout. If a switch cannot safely carry local edits across, it reports the error.
 
+## Automatic releases
+
+Every push to `main`, including a merged PR, runs **Release VSIX** in GitHub Actions. It installs locked dependencies, runs the tests, packages a VSIX, and publishes it under **Releases**. You can also run it manually from the Actions tab on `main`.
+
+Release versions use the major/minor from `package.json` and the workflow run number as the patch: `0.1.1`, `0.1.2`, and so on. The VSIX version, filename, and Git tag agree. The version is set only in the build workspace; no version-bump commit is pushed. Failed runs may leave gaps in the numbering, and re-running an already published run keeps that release intact. Change major/minor in `package.json` when starting a new release series.
+
+The workflow uses GitHub's automatic token with `contents: write`; no extra secret is required. Download `stacknav-<version>.vsix` from Releases and use **Extensions: Install from VSIX…** in VS Code.
+
 ## Development
 
 ```sh
