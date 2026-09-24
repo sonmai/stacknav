@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { navigation, parseCurrentPr, parseStack } from '../src/core';
+import { navigation, branchStatus, parseCurrentPr, parseStack } from '../src/core';
 
 test('reads bottom-to-top stack and current position', () => {
   const state = parseStack(JSON.stringify({
@@ -17,10 +17,11 @@ test('reads bottom-to-top stack and current position', () => {
   }
 });
 
-test('trunk and malformed payloads never expose a navigation layer', () => {
-  assert.deepEqual(parseStack(JSON.stringify({ trunk: 'main', currentBranch: 'main', branches: [
+test('trunk remains visible without pretending to be a PR layer', () => {
+  assert.equal(parseStack(JSON.stringify({ trunk: 'main', currentBranch: 'main', branches: [
     { name: 'feature', isCurrent: false }
-  ] })), { type: 'empty' });
+  ] })).type, 'trunk');
+  assert.equal(parseStack(JSON.stringify({ trunk: 'main', currentBranch: 'unrelated', branches: [] })).type, 'empty');
   assert.throws(() => parseStack('{"branches":[]}'), /Unexpected/);
 });
 
@@ -67,4 +68,11 @@ test('navigation from a merged current branch uses raw layer positions', () => {
   const targets = navigation(state.stack, state.index);
   assert.deepEqual(targets.selectable, [0, 1, 2]);
   assert.deepEqual(targets.moveTo(2), { direction: 'up', steps: 1 });
+});
+
+
+test('branch status exposes all parsed flags', () => {
+  const base = { name: 'api', isCurrent: true, isMerged: false, isQueued: false, needsRebase: false };
+  assert.equal(branchStatus(base), '');
+  assert.equal(branchStatus({ ...base, isMerged: true, isQueued: true, needsRebase: true }), ' · merged · queued · needs rebase');
 });

@@ -85,3 +85,53 @@ test('description preview handles empty bodies and caps lines and long paragraph
   assert.equal(descriptionPreview(' First\r\n\r\nSecond\r\nThird\r\nFourth'), 'First\nSecond\nThird…');
   assert.equal(descriptionPreview('a'.repeat(401)), 'a'.repeat(400) + '…');
 });
+
+test('title-only cache upgrades to a body lookup when that layer becomes current', async () => {
+  const calls: boolean[] = [];
+  const cache = new PrDetailsCache(async (_cwd, _url, includeBody) => {
+    calls.push(includeBody);
+    return includeBody ? { title: 'API', body: 'Preview' } : { title: 'API' };
+  });
+  await cache.get('/repo', 'url', false);
+  assert.equal(cache.peek('url')?.body, undefined);
+  await cache.get('/repo', 'url', true);
+  await cache.get('/repo', 'url', true);
+  assert.deepEqual(calls, [false, true]);
+  assert.equal(cache.peek('url')?.body, 'Preview');
+});
+
+test('aborted requests do not poison the cache with a failure cooldown', async () => {
+  let calls = 0;
+  const cache = new PrDetailsCache(async (_cwd, _url, _body, signal) => {
+    if (++calls === 1) { return new Promise((_resolve, reject) => signal!.addEventListener('abort', () => reject(signal!.reason))); }
+    return { title: 'Recovered' };
+  });
+  const controller = new AbortController();
+  const pending = cache.get('/repo', 'url', false, controller.signal);
+  controller.abort();
+  await pending;
+  assert.equal((await cache.get('/repo', 'url', false))?.title, 'Recovered');
+  assert.equal(calls, 2);
+});
+
+test('completed cache entries survive later cancellation of their generation', async () => {
+  let calls = 0;
+  const cache = new PrDetailsCache(async () => { calls++; return { title: 'API' }; });
+  const controller = new AbortController();
+  await cache.get('/repo', 'url', false, controller.signal);
+  controller.abort();
+  await cache.get('/repo', 'url', false);
+  assert.equal(calls, 1);
+});
+
+test('CLI requests only titles for non-current layers and caps cached body previews', async () => {
+  const seen: string[][] = [];
+  const cli = new StackCli(async args => {
+    seen.push([...args]);
+    return JSON.stringify({ title: 'API', body: 'x'.repeat(64_000) });
+  });
+  const url = 'https://github.com/o/r/pull/1';
+  assert.deepEqual(await cli.prDetails('/repo', url, false), { title: 'API' });
+  assert.equal((await cli.prDetails('/repo', url, true)).body?.length, 401);
+  assert.deepEqual(seen.map(args => args.at(-1)), ['title', 'title,body']);
+});

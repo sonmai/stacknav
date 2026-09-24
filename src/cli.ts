@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { PrDetails } from './prDetails';
-import { normalizePrUrl } from './core';
+import { normalizePrUrl, descriptionPreview } from './core';
 
 const executable = process.platform === 'win32' ? 'gh.exe' : 'gh';
 
@@ -12,17 +12,17 @@ export class CliError extends Error {
 
 export class RepositoryMismatchError extends Error {}
 
-type Runner = (args: readonly string[], cwd: string) => Promise<string>;
+type Runner = (args: readonly string[], cwd: string, signal?: AbortSignal) => Promise<string>;
 
 export class StackCli {
   constructor(private readonly runner: Runner = runGh) {}
 
-  view(cwd: string): Promise<string> {
-    return this.runner(['stack', 'view', '--json'], cwd);
+  view(cwd: string, signal?: AbortSignal): Promise<string> {
+    return this.runner(['stack', 'view', '--json'], cwd, signal);
   }
 
-  currentPr(cwd: string): Promise<string> {
-    return this.runner(['pr', 'view', '--json', 'number,url'], cwd);
+  currentPr(cwd: string, signal?: AbortSignal): Promise<string> {
+    return this.runner(['pr', 'view', '--json', 'number,url'], cwd, signal);
   }
 
   load(cwd: string, prUrl: string): Promise<string> {
@@ -47,14 +47,19 @@ export class StackCli {
     return this.runner(['stack', 'checkout', prUrl], cwd);
   }
 
-  async prDetails(cwd: string, prUrl: string): Promise<PrDetails> {
-    const value: unknown = JSON.parse(await this.runner(['pr', 'view', normalizePrUrl(prUrl), '--json', 'title,body'], cwd));
+  async prDetails(cwd: string, prUrl: string, includeBody = true, signal?: AbortSignal): Promise<PrDetails> {
+    const value: unknown = JSON.parse(await this.runner(['pr', 'view', normalizePrUrl(prUrl), '--json', includeBody ? 'title,body' : 'title'], cwd, signal));
     if (!value || typeof value !== 'object' || !('title' in value) || typeof value.title !== 'string') {
       throw new Error('Unexpected PR details response');
     }
+    if (!includeBody) { return { title: value.title.replace(/[\r\n]+/g, ' ').trim() }; }
     const body = ('body' in value ? value.body : undefined) ?? '';
     if (typeof body !== 'string') { throw new Error('Unexpected PR details response'); }
-    return { title: value.title.replace(/[\r\n]+/g, ' ').trim(), body };
+    return { title: value.title.replace(/[\r\n]+/g, ' ').trim(), body: descriptionPreview(body) };
+  }
+
+  firstLayer(cwd: string): Promise<string> {
+    return this.runner(['stack', 'up'], cwd);
   }
 
   move(cwd: string, direction: 'up' | 'down', steps = 1): Promise<string> {
@@ -64,15 +69,26 @@ export class StackCli {
   }
 }
 
-function runGh(args: readonly string[], cwd: string): Promise<string> {
+export function runGit(args: readonly string[], cwd: string, signal?: AbortSignal): Promise<string> {
+  return runCommand(process.platform === 'win32' ? 'git.exe' : 'git', args, cwd, signal);
+}
+
+function runGh(args: readonly string[], cwd: string, signal?: AbortSignal): Promise<string> {
+  return runCommand(executable, args, cwd, signal);
+}
+
+function runCommand(command: string, args: readonly string[], cwd: string, signal?: AbortSignal): Promise<string> {
   return new Promise((resolve, reject) => {
-    const child = execFile(executable, [...args], {
+    signal?.throwIfAborted();
+    const child = execFile(command, [...args], {
       cwd,
+      signal,
       timeout: args[1] === 'checkout' ? 120_000 : 30_000,
       maxBuffer: 2 * 1024 * 1024,
       env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
       windowsHide: true
     }, (error, stdout, stderr) => {
+      if (signal?.aborted) { reject(signal.reason); return; }
       if (!error) { resolve(stdout); return; }
       const failure = error as NodeJS.ErrnoException & { code?: string | number };
       const exitCode = typeof failure.code === 'number' ? failure.code : undefined;

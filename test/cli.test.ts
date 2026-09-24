@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
 import { RepositoryMismatchError, StackCli } from '../src/cli';
@@ -20,6 +20,7 @@ test('every command stays within the reviewer navigation allowlist', async () =>
   await cli.move('/repo', 'up');
   await cli.move('/repo', 'down');
   await cli.move('/repo', 'up', 2);
+  await cli.firstLayer('/repo');
   assert.deepEqual(calls, [
     ['stack', 'view', '--json'],
     ['pr', 'view', '--json', 'number,url'],
@@ -28,7 +29,8 @@ test('every command stays within the reviewer navigation allowlist', async () =>
     ['stack', 'checkout', 'https://github.com/o/r/pull/184'],
     ['stack', 'up'],
     ['stack', 'down'],
-    ['stack', 'up', '2']
+    ['stack', 'up', '2'],
+    ['stack', 'up']
   ]);
 });
 
@@ -97,4 +99,30 @@ test('matching enterprise repository accepts case differences and normalizes tab
     ['repo', 'view', '--json', 'url'],
     ['stack', 'checkout', 'https://git.example.com/owner/repo/pull/184']
   ]);
+});
+
+
+test('cancelling a background read terminates the running gh process', { skip: process.platform === 'win32' }, async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'stacknav-abort-'));
+  const previousPath = process.env.PATH;
+  writeFileSync(join(dir, 'gh'), '#!/usr/bin/env node\nconst fs = require("node:fs"); process.on("SIGTERM", () => { fs.writeFileSync("stopped", "yes"); process.exit(0); }); fs.writeFileSync("ready", "yes"); setInterval(() => {}, 100);\n');
+  chmodSync(join(dir, 'gh'), 0o755);
+  process.env.PATH = `${dir}${delimiter}${previousPath ?? ''}`;
+  const controller = new AbortController();
+  const waitFor = async (name: string) => {
+    for (let i = 0; i < 200 && !existsSync(join(dir, name)); i++) { await new Promise(resolve => setTimeout(resolve, 10)); }
+    assert.ok(existsSync(join(dir, name)), name);
+  };
+  const pending = new StackCli().view(dir, controller.signal);
+  const rejected = assert.rejects(pending, { name: 'AbortError' });
+  try {
+    await waitFor('ready');
+    controller.abort();
+    await rejected;
+    await waitFor('stopped');
+  } finally {
+    controller.abort();
+    process.env.PATH = previousPath;
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

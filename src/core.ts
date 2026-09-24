@@ -1,3 +1,4 @@
+import type { LocalStack } from './localStacks';
 export interface StackBranch {
   name: string;
   isCurrent: boolean;
@@ -22,6 +23,8 @@ export type NavState =
   | { type: 'empty' }
   | { type: 'error'; message: string }
   | { type: 'unloaded'; pr: CurrentPr }
+  | { type: 'stacks'; choices: LocalStack[] }
+  | { type: 'trunk'; stack: StackView }
   | { type: 'loaded'; stack: StackView; index: number };
 
 export function parseStack(json: string): NavState {
@@ -49,8 +52,11 @@ export function parseStack(json: string): NavState {
     };
   });
   const index = branches.findIndex(branch => branch.isCurrent);
-  // A trunk checkout is not a PR layer. There is no meaningful current position.
-  if (index < 0) { return { type: 'empty' }; }
+  if (index < 0) {
+    return value.currentBranch === value.trunk && branches.length
+      ? { type: 'trunk', stack: { trunk: value.trunk, currentBranch: value.currentBranch, branches } }
+      : { type: 'empty' };
+  }
   return { type: 'loaded', stack: { trunk: value.trunk, currentBranch: value.currentBranch, branches }, index };
 }
 
@@ -120,4 +126,9 @@ export function descriptionPreview(body: string): string {
   const opening = lines.slice(0, 3).join('\n');
   const clipped = opening.slice(0, 400).trimEnd();
   return clipped + (lines.length > 3 || opening.length > 400 ? '…' : '');
+}
+
+export function branchStatus(branch: StackBranch): string {
+  const flags = [branch.isMerged && 'merged', branch.isQueued && 'queued', branch.needsRebase && 'needs rebase'].filter(Boolean);
+  return flags.length ? ` · ${flags.join(' · ')}` : '';
 }
