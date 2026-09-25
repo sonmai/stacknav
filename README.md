@@ -76,6 +76,7 @@ If several local stacks share the same trunk, choose **Select stack…** to pick
 | **StackNav: Select PR…** | Choose a layer in the current stack. |
 | **StackNav: Go to First Layer** | Enter the first unmerged layer from trunk. |
 | **StackNav: Select Stack…** | Choose among local stacks that share the current trunk. |
+| **StackNav: Select Repository…** | Choose which repository StackNav should use in a multi-repository workspace. |
 | **StackNav: Refresh** | Reload stack and pull request information. |
 
 ## Requirements
@@ -85,7 +86,7 @@ If several local stacks share the same trunk, choose **Select stack…** to pick
 - [`github/gh-stack`](https://github.com/github/gh-stack) installed as a GitHub CLI extension
 - A desktop or remote workspace extension host with access to `git` and `gh`
 
-StackNav does not run in a browser extension host. In a workspace with multiple repositories, open a file from the repository you want to use before running a command.
+StackNav does not run in a browser extension host. In a workspace with multiple repositories, StackNav follows the repository of the active file and remembers the last repository when no file editor is open. You can also use **StackNav: Select Repository…** to choose one manually.
 
 ## Safety
 

@@ -84,14 +84,26 @@ test('host retains busy HEAD changes, replaces listeners, cancels stale reads an
     assert.match(bars[1].text, /queued · needs rebase/);
     assert.deepEqual(detailCalls.filter(call => call.body).map(call => call.url), ['https://github.com/o/r/pull/2']);
     assert.equal(bars[2].command, 'stacknav.up');
+    window.activeTextEditor = undefined;
+    editorChanged.fire();
+    await commands.get('stacknav.refresh')!(); await tick();
+    assert.equal(calls.at(-1), '/b');
+    window.activeTextEditor = { document: { uri: { scheme: 'file', fsPath: '/a/file' } } };
+    editorChanged.fire();
+    await new Promise(resolve => setTimeout(resolve, 300));
+    assert.equal(calls.at(-1), '/a');
     holdRead = true;
     const stale = commands.get('stacknav.refresh')!(); await tick();
     const staleSignal = signals.at(-1)!;
-    window.activeTextEditor.document.uri.fsPath = '/a/file';
+    window.activeTextEditor.document.uri.fsPath = '/b/file';
     editorChanged.fire();
     assert.ok(staleSignal.aborted);
     await stale;
     holdRead = false;
+    await new Promise(resolve => setTimeout(resolve, 300));
+    assert.equal(calls.at(-1), '/b');
+    window.activeTextEditor.document.uri.fsPath = '/a/file';
+    editorChanged.fire();
     await new Promise(resolve => setTimeout(resolve, 300));
     assert.equal(calls.at(-1), '/a');
     allMerged = true;
@@ -107,9 +119,29 @@ test('host retains busy HEAD changes, replaces listeners, cancels stale reads an
     window.showQuickPick = async () => undefined;
     await commands.get('stacknav.selectStack')!();
     assert.equal(entered, undefined);
-    window.showQuickPick = async (items: any[]) => { window.activeTextEditor.document.uri.fsPath = '/b/file'; return items[0]; };
+    window.showQuickPick = async (items: any[]) => {
+      window.activeTextEditor.document.uri.fsPath = '/b/file';
+      editorChanged.fire();
+      return items[0];
+    };
     await commands.get('stacknav.selectStack')!();
     assert.equal(entered, undefined);
+
+    const c = repo('/c', event());
+    window.activeTextEditor = undefined;
+    api.repositories.splice(1, 1, c);
+    closed.fire(b);
+    opened.fire(c);
+    await new Promise(resolve => setTimeout(resolve, 300));
+    assert.equal(bars[1].text, '$(repo) Select repository…');
+    assert.equal(bars[1].command, 'stacknav.selectRepository');
+    window.showQuickPick = async (items: any[]) => items[1];
+    await commands.get('stacknav.selectRepository')!();
+    assert.equal(calls.at(-1), '/c');
+    window.activeTextEditor = { document: { uri: { scheme: 'file', fsPath: '/a/file' } } };
+    editorChanged.fire();
+    await new Promise(resolve => setTimeout(resolve, 300));
+    assert.equal(calls.at(-1), '/a');
   } finally {
     for (const subscription of subscriptions) { subscription.dispose(); }
     LocalStacks.prototype.list = originalList; LocalStacks.prototype.enter = originalEnter;
