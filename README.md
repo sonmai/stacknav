@@ -1,56 +1,104 @@
 # StackNav
 
-Navigate GitHub stacked PRs from the VS Code status bar. StackNav is a small reviewer UI for [`github/gh-stack`](https://github.com/github/gh-stack).
+<p align="center">
+  <img src="media/icon.png" width="128" height="128" alt="StackNav logo">
+</p>
 
-When the current branch belongs to a locally loaded stack, the status bar shows:
+<p align="center"><strong>Review GitHub stacked pull requests without losing your place.</strong></p>
 
-`↓  2/4 · #184  ↑`
+StackNav brings [`github/gh-stack`](https://github.com/github/gh-stack) navigation into the VS Code status bar. See where you are in a stack, identify the current pull request, and move between layers without leaving the editor.
 
-Click an arrow to move one layer. Click the middle to choose a layer from a VS Code Quick Pick; it moves the required number of local layers with `gh stack up/down`. When the current branch is active, merged layers are omitted because `gh-stack` skips them during navigation. The picker and tooltips show **PR number + title**, with the branch name underneath in the picker. The middle tooltip shows only the stack position, current PR number and title, and the first three non-empty description lines (up to 400 characters). The arrow tooltips show the next reachable PR. At the top or bottom, the unavailable arrow is hidden.
+<code>↓&nbsp; 2/4 · &#35;184 Add input validation &nbsp;↑</code>
 
-When you check out a PR branch that has no local stack, StackNav offers **Load stack for #184**. This detects a PR on the current branch, but cannot establish whether the PR belongs to a remote stack until you click Load. Loading uses the PR URL with `gh stack checkout`, fetches its stack locally, and may switch your local branch. An ordinary PR without a stack will report an error in **Output → StackNav**.
+## Highlights
 
-You can also run **StackNav: Load Stack from PR URL…** and paste a PR link without first checking out its branch. Links to the Files, Commits, and Checks tabs are accepted. Before checkout, StackNav checks the PR URL’s host and owner/repository against the repository resolved by GitHub CLI in the selected local folder. A mismatch or failed lookup stops loading. The command uses the active local repository, or asks you to choose one when there is no active repository in a multi-repository workspace.
+- See the current stack position, pull request number, and title at a glance.
+- Move to the previous or next reachable layer with one click.
+- Open a Quick Pick to jump directly to any pull request in the stack.
+- Preview the first few lines of the current pull request description in the tooltip.
+- See concise `merged`, `queued`, and `needs rebase` status labels.
+- Load a stack from the current pull request or from a pasted GitHub pull request URL.
+- Enter a stack from trunk, including repositories with multiple local stacks.
 
-Titles load for the stack in the background, with at most four lookups at once. Only the current layer requests a description; only its short preview is retained. Titles and previews are cached for five minutes during the session. If a title lookup fails, PR number and branch name remain available; navigation does not wait for titles. **StackNav: Refresh** clears the title cache.
+## Getting started
 
-The middle item and picker rows show short `merged`, `queued`, and `needs rebase` suffixes when applicable. On trunk, StackNav stays visible and offers **Go to First Layer** for the first unmerged layer. If all layers are merged, it shows trunk without a checkout action. When multiple local stacks share the trunk, **Select stack…** opens a picker and checks out the chosen stack’s first unmerged branch. Cancel leaves the checkout unchanged. StackNav rechecks the selection before switching.
+1. Install [GitHub CLI](https://cli.github.com/) and authenticate:
 
-## Setup
+   ```sh
+   gh auth login
+   ```
 
-1. Install [GitHub CLI](https://cli.github.com/) and authenticate with `gh auth login`.
-2. Install its stack extension: `gh extension install github/gh-stack`.
-3. Install StackNav in VS Code, open a Git repository, and check out a PR branch.
+2. Install the GitHub stack extension:
 
-The VS Code built-in Git extension must be enabled. In a workspace with multiple repositories, open a file from the desired repository to select it. StackNav runs in the Node workspace extension host (local desktop or remote workspace) with access to `gh`; it does not run in a browser extension host. It declares `vscode.git` as a dependency and reports unavailable/disabled Git when activation can run.
+   ```sh
+   gh extension install github/gh-stack
+   ```
 
-If the repository has multiple Git remotes, configure the intended one before loading a stack (for example, `git config remote.pushDefault origin`). If a different local stack already tracks those branches, resolve that conflict manually; StackNav does not unstack them.
+3. Install StackNav, open a Git repository in VS Code, and check out a branch that belongs to a stack.
+
+StackNav appears in the status bar when it finds a local stack. The built-in VS Code Git extension must be enabled.
+
+## Using the status bar
+
+The middle item shows your position and the current pull request:
+
+<code>2/4 · &#35;184 Add input validation</code>
+
+- Click the down or up arrow to move one reachable layer.
+- Click the middle item to choose any layer from a Quick Pick.
+- Hover over the middle item to preview the current pull request description.
+- Hover over an arrow to see the next reachable pull request.
+
+Merged layers are skipped when `gh-stack` would skip them. At the top or bottom of a stack, the unavailable arrow is hidden.
+
+## Loading a stack
+
+If the current branch has a pull request but no local stack, StackNav offers **Load stack for &#35;184**. This runs `gh stack checkout` for the pull request URL, fetches the stack branches, and may change the checked-out branch.
+
+You can also run **StackNav: Load Stack from PR URL…** and paste a GitHub pull request link. Links to Files, Commits, and Checks tabs are accepted. StackNav verifies that the URL belongs to the selected local repository before loading it.
+
+An ordinary pull request that is not part of a stack may produce an error. Open **Output**, then select **StackNav** to see the details.
+
+## Using StackNav from trunk
+
+When a stack is associated with the current trunk, StackNav stays visible and offers **Go to First Layer**. It enters the first unmerged layer.
+
+If several local stacks share the same trunk, choose **Select stack…** to pick the stack you want. Canceling the picker leaves your checkout unchanged.
 
 ## Commands
 
-- **StackNav: Load Stack for Current PR** — explicitly fetch a remote stack to local branches.
-- **StackNav: Load Stack from PR URL…** — fetch and check out a stack from a pasted PR link.
-- **StackNav: Up** and **StackNav: Down** — switch between adjacent layers.
-- **StackNav: Select Stack…** — choose among local stacks sharing the current trunk.
-- **StackNav: Go to First Layer** — from trunk, enter the first unmerged layer with one `gh stack up` call.
-- **StackNav: Select PR…** — choose a layer in the current local stack.
-- **StackNav: Refresh** — re-read the current stack and PR.
+| Command | Purpose |
+| --- | --- |
+| **StackNav: Load Stack for Current PR** | Load the stack for the pull request on the current branch. |
+| **StackNav: Load Stack from PR URL…** | Load a stack from a pasted GitHub pull request link. |
+| **StackNav: Up** | Move to the next reachable layer. |
+| **StackNav: Down** | Move to the previous reachable layer. |
+| **StackNav: Select PR…** | Choose a layer in the current stack. |
+| **StackNav: Go to First Layer** | Enter the first unmerged layer from trunk. |
+| **StackNav: Select Stack…** | Choose among local stacks that share the current trunk. |
+| **StackNav: Refresh** | Reload stack and pull request information. |
 
-The status bar refreshes after HEAD changes and StackNav actions, or when you run Refresh. Editing or saving a file does not trigger a stack lookup. HEAD changes during a checkout are coalesced into a refresh when it finishes. Stale background reads are cancelled when a new refresh supersedes them or the extension is disposed. In-progress checkout operations are not cancelled when switching editor repositories. There is no polling and no default keyboard shortcut.
+## Requirements
+
+- VS Code with the built-in Git extension enabled
+- [GitHub CLI](https://cli.github.com/) authenticated for the repository
+- [`github/gh-stack`](https://github.com/github/gh-stack) installed as a GitHub CLI extension
+- A desktop or remote workspace extension host with access to `git` and `gh`
+
+StackNav does not run in a browser extension host. In a workspace with multiple repositories, open a file from the repository you want to use before running a command.
 
 ## Safety
 
-StackNav never calls `gh stack sync`, `push`, `submit`, `rebase`, or any command that writes remote branches or PRs. It uses `gh stack view --json` and `gh pr view --json` to display state, and `gh repo view --json url` to check repository identity before loading. Loading a remote stack with `gh stack checkout <PR URL>` fetches branches and sets up local tracking; navigation changes the local checkout. `gh stack view --json` may refresh PR status in local metadata. The multi-stack picker reads gh-stack schema-v1 metadata from Git’s resolved directory without modifying it, then uses `git switch --no-guess -- <branch>` for the selected local branch. Unsupported metadata produces an error rather than guessing. StackNav never stashes, resets, or forces a checkout. If a switch cannot safely carry local edits across, it reports the error.
+StackNav reads stack and pull request information, then changes only your local checkout when you navigate or load a stack. It never runs `gh stack sync`, `push`, `submit`, or `rebase`. It also never stashes, resets, or forces a checkout.
 
-## Automatic releases
+Loading a remote stack uses `gh stack checkout`, which fetches branches and configures local tracking. If Git cannot safely carry your local changes to another branch, StackNav stops and reports the error.
 
-Pull requests targeting `main` run **PR checks / test** (`npm ci` and `npm test`). Make this a required status check in the repository rules to block merging failures.
+## Troubleshooting
 
-Every push to `main`, including a merged PR, runs **Release VSIX** in GitHub Actions. It installs locked dependencies, runs the tests, packages a VSIX, and publishes it under **Releases**. You can also run it manually from the Actions tab on `main`.
-
-Release versions use the major/minor from `package.json` and the workflow run number as the patch: `0.1.1`, `0.1.2`, and so on. The VSIX version, filename, and Git tag agree. The version is set only in the build workspace; no version-bump commit is pushed. Failed runs may leave gaps in the numbering, and re-running an already published run keeps that release intact. Change major/minor in `package.json` when starting a new release series.
-
-The workflow uses GitHub's automatic token with `contents: write`; no extra secret is required. Download `stacknav-<version>.vsix` from Releases and use **Extensions: Install from VSIX…** in VS Code.
+- Open **Output**, then select **StackNav** for command output and errors.
+- If the repository has multiple remotes, configure the intended remote, for example with `git config remote.pushDefault origin`.
+- If another local stack already tracks the same branches, resolve that conflict with `gh-stack` before loading the stack again.
+- Run **StackNav: Refresh** to clear cached pull request titles and reload the current state.
 
 ## Development
 
@@ -59,6 +107,4 @@ npm install
 npm test
 ```
 
-`npm test` and VSIX prepublish both clean `out/` before compiling, so renamed tests and modules cannot survive from an earlier build.
-
-Open this folder in VS Code and press **F5** to launch an Extension Development Host. The extension's compiled entry point is `out/src/extension.js`.
+Open the repository in VS Code and press **F5** to launch an Extension Development Host. Pull requests targeting `main` run the test suite. Every push to `main` also builds a versioned VSIX and publishes it under GitHub Releases.
