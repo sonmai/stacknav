@@ -4,7 +4,7 @@
   <img src="media/icon.png" width="128" height="128" alt="StackNav logo">
 </p>
 
-<p align="center"><strong>Review GitHub stacked pull requests without losing your place.</strong></p>
+<p align="center"><strong>See your position and navigate GitHub stacked pull requests from the VS Code status bar.</strong></p>
 
 StackNav brings [`github/gh-stack`](https://github.com/github/gh-stack) navigation into the VS Code status bar. See where you are in a stack, identify the current pull request, and move between layers without leaving the editor.
 
