@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { relative, isAbsolute, sep } from 'node:path';
+import { basename, relative, isAbsolute, sep } from 'node:path';
 import { CliError, RepositoryMismatchError, StackCli } from './cli';
 import { NavState, navigation, normalizePrUrl, parseCurrentPr, parseStack, prLabel, prSummary, branchStatus, StackBranch, StackView } from './core';
 import { LocalStacks } from './localStacks';
@@ -66,7 +66,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   let updatePicker: (() => void) | undefined;
   let disposed = false;
 
-  function activeRepository(): GitRepository | undefined {
+  function repositoryForActiveEditor(): GitRepository | undefined {
     if (!api) { return undefined; }
     const editor = vscode.window.activeTextEditor;
     if (editor?.document.uri.scheme === 'file') {
@@ -79,14 +79,32 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         return candidates.sort((a, b) => b.rootUri.fsPath.length - a.rootUri.fsPath.length)[0];
       }
     }
-    return api.repositories.length === 1 ? api.repositories[0]
-      : selectedRepository && api.repositories.includes(selectedRepository) ? selectedRepository : undefined;
+    return undefined;
+  }
+
+  function activeRepository(): GitRepository | undefined {
+    if (!api) { return undefined; }
+    if (selectedRepository && api.repositories.includes(selectedRepository)) { return selectedRepository; }
+    const active = repositoryForActiveEditor();
+    if (active) {
+      selectedRepository = active;
+      return active;
+    }
+    return api.repositories.length === 1 ? api.repositories[0] : undefined;
   }
 
   function hide(): void {
     down.hide();
     center.hide();
     up.hide();
+  }
+
+  function renderRepositorySelection(): void {
+    hide();
+    center.text = '$(repo) Select repository…';
+    center.tooltip = 'Choose which Git repository StackNav should use.';
+    center.command = 'stacknav.selectRepository';
+    center.show();
   }
 
   function details(branch: StackBranch | undefined): string {
@@ -188,7 +206,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     if (!root) {
       state = { type: 'empty' };
       stateRoot = undefined;
-      render();
+      if (api.repositories.length > 1) { renderRepositorySelection(); }
+      else { render(); }
       return;
     }
     try {
@@ -265,10 +284,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       repositoryListeners.get(repo)?.dispose();
       repositoryListeners.delete(repo);
       observedHeads.delete(repo);
+      if (selectedRepository === repo) { selectedRepository = undefined; }
       scheduleRefresh();
     }));
   }
   context.subscriptions.push(vscode.window.onDidChangeActiveTextEditor(() => {
+    const active = repositoryForActiveEditor();
+    if (active) { selectedRepository = active; }
     if (activeRepository()?.rootUri.fsPath !== stateRoot) { scheduleRefresh(); }
   }));
   context.subscriptions.push({ dispose: () => {
@@ -325,6 +347,20 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   context.subscriptions.push(
     vscode.commands.registerCommand('stacknav.refresh', () => { titles.clear(); return refresh(); }),
+    vscode.commands.registerCommand('stacknav.selectRepository', async () => {
+      if (!api?.repositories.length) {
+        void vscode.window.showInformationMessage('StackNav: Open a local Git repository first.');
+        return;
+      }
+      const chosen = await vscode.window.showQuickPick(api.repositories.map(repository => ({
+        label: basename(repository.rootUri.fsPath),
+        description: repository.rootUri.fsPath,
+        repository
+      })), { placeHolder: 'Choose the repository StackNav should use', matchOnDescription: true });
+      if (!chosen) { return; }
+      selectedRepository = chosen.repository;
+      await refresh();
+    }),
     vscode.commands.registerCommand('stacknav.loadUrl', async () => {
       if (busy) { return; }
       let repo = activeRepository();
