@@ -53,6 +53,10 @@
       {
         "command": "stacknav.selectStack",
         "title": "StackNav: Select Stack\u2026"
+      },
+      {
+        "command": "stacknav.selectRepository",
+        "title": "StackNav: Select Repository\u2026"
       }
     ]
   },
