@@ -2,6 +2,7 @@
   "name": "stacknav",
   "displayName": "StackNav",
   "description": "Navigate GitHub stacked pull requests from the VS Code status bar.",
+  "icon": "media/icon.png",
   "version": "0.1.0",
   "publisher": "sonmai",
   "license": "MIT",
