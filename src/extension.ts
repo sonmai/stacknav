@@ -26,7 +26,7 @@ interface GitExtension {
 }
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
-  const output = vscode.window.createOutputChannel('StackNav');
+  const output = vscode.window.createOutputChannel('Stack Navigator');
   const cli = new StackCli();
   const localStacks = new LocalStacks();
   const titles = new PrDetailsCache(async (root, url, includeBody, signal) => {
@@ -51,7 +51,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     api = git?.getAPI(1);
   } catch (error) { output.appendLine(`Git extension: ${String(error)}`); }
   if (!api || git?.enabled === false) {
-    void vscode.window.showWarningMessage('StackNav requires the built-in Git extension. Enable Git and reload the window.');
+    void vscode.window.showWarningMessage('Stack Navigator requires the built-in Git extension. Enable Git and reload the window.');
   }
   const repositoryListeners = new Map<GitRepository, vscode.Disposable>();
   const observedHeads = new Map<GitRepository, string>();
@@ -102,7 +102,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   function renderRepositorySelection(): void {
     hide();
     center.text = '$(repo) Select repository…';
-    center.tooltip = 'Choose which Git repository StackNav should use.';
+    center.tooltip = 'Choose which Git repository Stack Navigator should use.';
     center.command = 'stacknav.selectRepository';
     center.show();
   }
@@ -134,7 +134,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     hide();
     if (state.type === 'empty') { return; }
     if (state.type === 'error') {
-      center.text = '$(warning) StackNav';
+      center.text = '$(warning) Stack Navigator';
       center.tooltip = state.message;
       center.command = 'stacknav.refresh';
       center.show();
@@ -229,7 +229,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         } catch (listError) {
           if (signal.aborted || ticket !== generation) { return; }
           output.appendLine(`List stacks: ${String(listError)}`);
-          state = { type: 'error', message: 'Could not list local stacks. Check Output → StackNav, or check out a PR branch manually.' };
+          state = { type: 'error', message: 'Could not list local stacks. Check Output → Stack Navigator, or check out a PR branch manually.' };
         }
       } else if (error instanceof CliError && error.exitCode === 2) {
         try {
@@ -247,7 +247,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           ? 'GitHub CLI (gh) was not found. Install it and click to retry.'
           : error instanceof CliError && error.exitCode === 6
             ? 'This branch belongs to several stacks. Check out a PR branch unique to the stack, then refresh.'
-            : 'Could not read the stack. Check Output → StackNav; click to retry.' };
+            : 'Could not read the stack. Check Output → Stack Navigator; click to retry.' };
       }
       stateRoot = root;
       render();
@@ -319,7 +319,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       if (showProgress) {
         await vscode.window.withProgress({
           location: vscode.ProgressLocation.Notification,
-          title: 'StackNav: Loading stack for review…',
+          title: 'Stack Navigator: Loading stack for review…',
           cancellable: false
         }, () => action(root));
       } else {
@@ -340,7 +340,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         : failure instanceof CliError && /remote\.pushDefault|multiple remotes|choose.*remote/i.test(failure.message)
           ? 'Set Git remote.pushDefault for this repository, then try again.'
           : 'See Output for details.';
-      const choice = await vscode.window.showErrorMessage(`StackNav: ${label} failed. ${detail}`, 'Show Output');
+      const choice = await vscode.window.showErrorMessage(`Stack Navigator: ${label} failed. ${detail}`, 'Show Output');
       if (choice) { output.show(true); }
     }
   }
@@ -349,14 +349,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     vscode.commands.registerCommand('stacknav.refresh', () => { titles.clear(); return refresh(); }),
     vscode.commands.registerCommand('stacknav.selectRepository', async () => {
       if (!api?.repositories.length) {
-        void vscode.window.showInformationMessage('StackNav: Open a local Git repository first.');
+        void vscode.window.showInformationMessage('Stack Navigator: Open a local Git repository first.');
         return;
       }
       const chosen = await vscode.window.showQuickPick(api.repositories.map(repository => ({
         label: basename(repository.rootUri.fsPath),
         description: repository.rootUri.fsPath,
         repository
-      })), { placeHolder: 'Choose the repository StackNav should use', matchOnDescription: true });
+      })), { placeHolder: 'Choose the repository Stack Navigator should use', matchOnDescription: true });
       if (!chosen) { return; }
       selectedRepository = chosen.repository;
       await refresh();
@@ -372,7 +372,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         repo = chosen.repository;
         selectedRepository = repo;
       }
-      if (!repo) { vscode.window.showInformationMessage('StackNav: Open a local Git repository first.'); return; }
+      if (!repo) { vscode.window.showInformationMessage('Stack Navigator: Open a local Git repository first.'); return; }
       const root = repo.rootUri.fsPath;
       const input = await vscode.window.showInputBox({
         title: 'Load Stack from PR URL',
@@ -404,12 +404,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         }] : [];
       });
       if (!items.length) {
-        void vscode.window.showInformationMessage('StackNav: All layers in these stacks are merged.'); return;
+        void vscode.window.showInformationMessage('Stack Navigator: All layers in these stacks are merged.'); return;
       }
       const selected = await vscode.window.showQuickPick(items, { placeHolder: 'Select a stack to enter its first active layer', matchOnDetail: true });
       if (!selected) { return; }
       if (activeRepository()?.rootUri.fsPath !== root) {
-        void vscode.window.showInformationMessage('StackNav: The active repository changed. Select the stack again.'); return;
+        void vscode.window.showInformationMessage('Stack Navigator: The active repository changed. Select the stack again.'); return;
       }
       await perform('Enter stack', cwd => localStacks.enter(cwd, selected.stack), false, root);
     }),
@@ -467,7 +467,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             state.stack.branches.length !== stack.branches.length ||
             state.stack.branches.some((branch, index) =>
               branch.name !== stack.branches[index].name || branch.isMerged !== stack.branches[index].isMerged)) {
-          vscode.window.showInformationMessage('StackNav: The stack changed. Select the PR again.');
+          vscode.window.showInformationMessage('Stack Navigator: The stack changed. Select the PR again.');
           return;
         }
         const move = navigation(state.stack, state.index).moveTo(selected.index);
