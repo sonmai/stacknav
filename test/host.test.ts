@@ -34,7 +34,10 @@ test('host retains busy HEAD changes, replaces listeners, cancels stale reads an
   };
   const Module = require('node:module');
   const originalLoad = Module._load;
-  Module._load = function(id: string, ...args: any[]) { return id === 'vscode' ? vscode : originalLoad.call(this, id, ...args); };
+  Module._load = function(id: string, ...args: any[]) {
+    if (id === './reviewOverview') { return { ReviewOverview: class { update() {} dispose() {} } }; }
+    return id === 'vscode' ? vscode : originalLoad.call(this, id, ...args);
+  };
   const { activate } = require('../src/extension');
   Module._load = originalLoad;
   const subscriptions: { dispose(): void }[] = [];

@@ -65,6 +65,21 @@ When a stack is associated with the current trunk, Stack Navigator stays visible
 
 If several local stacks share the same trunk, choose **Select stack…** to pick the stack you want. Canceling the picker leaves your checkout unchanged.
 
+## Stack review overview (prototype)
+
+The **Stack Navigator** view in Explorer lists PRs in the current local stack.
+Expand a PR to load its review decision, CI summary and review threads, including resolved threads.
+Expanding does not change branches. Click a thread to check out its local branch and open its code with a read-only native comment thread.
+
+- Matching local files open for editing; outdated comments or differing local content open a read-only PR revision.
+- Comments on the old side of a diff show the original diff excerpt, not a guessed location in the working file. Missing historical revisions use the same fallback.
+- Checkout never stashes, resets, rebases or forces changes. If blocked, choose **View read-only** to inspect the comment without completing checkout.
+- Unsaved file editors must be saved or closed before checkout. The prototype checks all open file editors conservatively.
+- Use the view's **Refresh** button to reload reviews. Metadata is loaded on expansion and cached until refreshed; there is no background polling yet.
+- Reply, resolve, general PR conversation comments and advanced filters are not included. Only the selected thread is displayed by Stack Navigator.
+
+This prototype still needs interactive testing alongside GitHub Pull Requests to check for duplicate comment widgets and editor focus behavior. See [the validation checklist](docs/review-overview-validation.md).
+
 ## Commands
 
 | Command | Purpose |

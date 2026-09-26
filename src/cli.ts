@@ -73,7 +73,7 @@ export function runGit(args: readonly string[], cwd: string, signal?: AbortSigna
   return runCommand(process.platform === 'win32' ? 'git.exe' : 'git', args, cwd, signal);
 }
 
-function runGh(args: readonly string[], cwd: string, signal?: AbortSignal): Promise<string> {
+export function runGh(args: readonly string[], cwd: string, signal?: AbortSignal): Promise<string> {
   return runCommand(executable, args, cwd, signal);
 }
 
