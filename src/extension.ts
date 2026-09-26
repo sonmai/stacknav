@@ -4,6 +4,7 @@ import { CliError, RepositoryMismatchError, StackCli } from './cli';
 import { NavState, navigation, normalizePrUrl, parseCurrentPr, parseStack, prLabel, prSummary, branchStatus, StackBranch, StackView } from './core';
 import { LocalStacks } from './localStacks';
 import { PrDetailsCache } from './prDetails';
+import { ReviewOverview } from './reviewOverview';
 
 interface GitRepository {
   rootUri: vscode.Uri;
@@ -65,6 +66,15 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   let selectedRepository: GitRepository | undefined;
   let updatePicker: (() => void) | undefined;
   let disposed = false;
+  const overview = new ReviewOverview(async (root, action) => {
+    if (busy) { throw new Error('Another navigation is in progress. Try again when it finishes.'); }
+    if (!vscode.workspace.isTrusted) { throw new Error('Trust this workspace before checking out a PR.'); }
+    const repo = api?.repositories.find(repo => repo.rootUri.fsPath === root);
+    if (!repo) { throw new Error('The repository is no longer open.'); }
+    selectedRepository = repo;
+    await perform('Open review thread', async () => { await action(); return ''; }, true, root);
+  }, url => titles.peek(url)?.title);
+  context.subscriptions.push(overview);
 
   function repositoryForActiveEditor(): GitRepository | undefined {
     if (!api) { return undefined; }
@@ -100,6 +110,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   }
 
   function renderRepositorySelection(): void {
+    overview.update(undefined, { type: 'empty' });
     hide();
     center.text = '$(repo) Select repository…';
     center.tooltip = 'Choose which Git repository Stack Navigator should use.';
@@ -131,6 +142,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   }
 
   function render(): void {
+    overview.update(stateRoot, state);
     hide();
     if (state.type === 'empty') { return; }
     if (state.type === 'error') {

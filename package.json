@@ -21,7 +21,22 @@
     "onStartupFinished"
   ],
   "contributes": {
+    "views": {
+      "explorer": [
+        { "id": "stacknav.overview", "name": "Stack Navigator", "contextualTitle": "Stack Review Overview" }
+      ]
+    },
+    "menus": {
+      "view/title": [
+        { "command": "stacknav.refreshOverview", "when": "view == stacknav.overview", "group": "navigation" }
+      ]
+    },
     "commands": [
+      {
+        "command": "stacknav.refreshOverview",
+        "title": "Stack Navigator: Refresh Review Overview",
+        "icon": "$(refresh)"
+      },
       {
         "command": "stacknav.load",
         "title": "Stack Navigator: Load Stack for Current PR"
